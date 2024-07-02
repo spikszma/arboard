@@ -14,7 +14,7 @@ use std::borrow::Cow;
 
 pub use common::Error;
 #[cfg(feature = "image-data")]
-pub use common::ImageData;
+pub use common::{ImageData, ImageRgba};
 
 mod platform;
 
@@ -329,7 +329,7 @@ mod tests {
 				100, 100, 255, 100,
 				0, 0, 0, 255,
 			];
-			let img_data = ImageData { width: 2, height: 2, bytes: bytes.as_ref().into() };
+			let img_data = ImageData::rgba(2, 2, Cow::from(bytes.as_ref()));
 
 			// Make sure that setting one format overwrites the other.
 			ctx.set_image(img_data.clone()).unwrap();
@@ -341,7 +341,7 @@ mod tests {
 			// Test if we get the same image that we put onto the clipboard
 			ctx.set_image(img_data.clone()).unwrap();
 			let got = ctx.get_image().unwrap();
-			assert_eq!(img_data.bytes, got.bytes);
+			assert_eq!(img_data.bytes(), got.bytes());
 
 			#[rustfmt::skip]
 			let big_bytes = vec![
@@ -354,10 +354,10 @@ mod tests {
 				0, 1, 2, 255,
 			];
 			let bytes_cloned = big_bytes.clone();
-			let big_img_data = ImageData { width: 3, height: 2, bytes: big_bytes.into() };
+			let big_img_data = ImageData::rgba(3, 2, Cow::from(bytes.as_ref()));
 			ctx.set_image(big_img_data).unwrap();
 			let got = ctx.get_image().unwrap();
-			assert_eq!(bytes_cloned.as_slice(), got.bytes.as_ref());
+			assert_eq!(bytes_cloned.as_slice(), got.bytes().as_ref());
 		}
 		#[cfg(all(
 			unix,

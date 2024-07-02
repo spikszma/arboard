@@ -3,9 +3,9 @@ use std::{borrow::Cow, time::Instant};
 #[cfg(feature = "wayland-data-control")]
 use log::{trace, warn};
 
-#[cfg(feature = "image-data")]
-use crate::ImageData;
 use crate::{common::private, Error};
+#[cfg(feature = "image-data")]
+use crate::{ImageData, ImageRgba};
 
 mod x11;
 
@@ -17,7 +17,7 @@ fn into_unknown<E: std::fmt::Display>(error: E) -> Error {
 }
 
 #[cfg(feature = "image-data")]
-fn encode_as_png(image: &ImageData) -> Result<Vec<u8>, Error> {
+fn encode_as_png(image: &ImageRgba) -> Result<Vec<u8>, Error> {
 	use image::ImageEncoder as _;
 
 	if image.bytes.is_empty() || image.width == 0 || image.height == 0 {
