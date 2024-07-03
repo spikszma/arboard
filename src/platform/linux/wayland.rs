@@ -234,8 +234,7 @@ impl Clipboard {
 		let mut opts = Options::new();
 		opts.foreground(matches!(wait, WaitConfig::Forever));
 		opts.clipboard(selection.try_into()?);
-		let source = Source::Bytes(svg.into_bytes().into_boxed_slice());
-		opts.copy(source, MimeType::Specific(MIME_SVG.into())).map_err(into_unknown)?;
-		Ok(())
+		let source = Source::Bytes(svg.clone().into_bytes().into_boxed_slice());
+		opts.copy(source, MimeType::Specific(MIME_SVG.into())).map_err(into_unknown)
 	}
 }

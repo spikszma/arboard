@@ -983,9 +983,11 @@ impl Clipboard {
 		selection: LinuxClipboardKind,
 		wait: WaitConfig,
 	) -> Result<()> {
-		let data =
-			vec![ClipboardData { bytes: svg.into_bytes(), format: self.inner.atoms.SVG_MIME }];
-		self.inner.write(data, selection, wait)
+		let data = vec![ClipboardData {
+			bytes: svg.clone().into_bytes(),
+			format: self.inner.atoms.SVG_MIME,
+		}];
+		self.inner.write(data, selection, wait.clone())
 	}
 }
 

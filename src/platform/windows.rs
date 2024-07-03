@@ -569,8 +569,8 @@ impl<'clipboard> Get<'clipboard> {
 	pub(crate) fn image(self) -> Result<ImageData<'static>, Error> {
 		let _clipboard_assertion = self.clipboard?;
 
-		match Self::image_dibv5() {
-			Err(Error::ContentNotAvailable) => Self::image_svg(),
+		match Self::image_svg() {
+			Err(Error::ContentNotAvailable) => Self::image_dibv5(),
 			result => result,
 		}
 	}
@@ -665,14 +665,16 @@ impl<'clipboard> Set<'clipboard> {
 	}
 
 	#[cfg(feature = "image-data")]
-	pub(crate) fn image(self, image: ImageData) -> Result<(), Error> {
+	pub(crate) fn image(self, image: ImageData, clear: bool) -> Result<(), Error> {
 		let open_clipboard = self.clipboard?;
 
-		if let Err(e) = clipboard_win::raw::empty() {
-			return Err(Error::unknown(format!(
-				"Failed to empty the clipboard. Got error code: {e}"
-			)));
-		};
+		if clear {
+			if let Err(e) = clipboard_win::raw::empty() {
+				return Err(Error::unknown(format!(
+					"Failed to empty the clipboard. Got error code: {e}"
+				)));
+			};
+		}
 
 		match image {
 			ImageData::Rgba(image) => Self::image_rgba(open_clipboard, image),
@@ -695,7 +697,7 @@ impl<'clipboard> Set<'clipboard> {
 	#[cfg(feature = "image-data")]
 	fn image_svg(svg: String) -> Result<(), Error> {
 		if let Some(format) = clipboard_win::register_format(CFSTR_MIME_SVG_XML) {
-			clipboard_win::raw::set(format.get(), svg.as_bytes())
+			clipboard_win::raw::set_without_clear(format.get(), svg.as_bytes())
 				.map_err(|_| Error::unknown("Failed to set SVG data to clipboard"))?;
 			Ok(())
 		} else {

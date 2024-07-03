@@ -9,6 +9,8 @@ and conditions of the chosen license apply to this file.
 */
 
 #[cfg(feature = "image-data")]
+use resvg::{tiny_skia, usvg};
+#[cfg(feature = "image-data")]
 use std::borrow::Cow;
 
 /// An error that might happen during a clipboard operation.
@@ -173,6 +175,13 @@ impl<'a> ImageData<'a> {
 			ImageData::Svg(s) => s.as_bytes(),
 		}
 	}
+
+	pub fn get_svg(&self) -> Option<&str> {
+		match self {
+			ImageData::Rgba(_) => None,
+			ImageData::Svg(s) => Some(s),
+		}
+	}
 }
 
 #[cfg(feature = "image-data")]
@@ -226,4 +235,15 @@ pub(crate) mod private {
 	impl Sealed for crate::Get<'_> {}
 	impl Sealed for crate::Set<'_> {}
 	impl Sealed for crate::Clear<'_> {}
+}
+
+#[cfg(feature = "image-data")]
+pub(crate) fn svg2pixmap<'s>(svg: &'s str) -> Result<tiny_skia::Pixmap, usvg::Error> {
+	let mut opt = usvg::Options::default();
+	opt.fontdb_mut().load_system_fonts();
+	let tree = usvg::Tree::from_data(svg.as_bytes(), &opt)?;
+	let pixmap_size = tree.size().to_int_size();
+	let mut pixmap = tiny_skia::Pixmap::new(pixmap_size.width(), pixmap_size.height()).unwrap();
+	resvg::render(&tree, tiny_skia::Transform::default(), &mut pixmap.as_mut());
+	Ok(pixmap)
 }

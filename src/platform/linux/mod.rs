@@ -141,7 +141,7 @@ impl GetExtLinux for crate::Get<'_> {
 }
 
 /// Configuration on how long to wait for a new X11 copy event is emitted.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) enum WaitConfig {
 	/// Waits until the given [`Instant`] has reached.
 	Until(Instant),
@@ -184,7 +184,7 @@ impl<'clipboard> Set<'clipboard> {
 	}
 
 	#[cfg(feature = "image-data")]
-	pub(crate) fn image(self, image: ImageData<'_>) -> Result<(), Error> {
+	pub(crate) fn image(self, image: ImageData<'_>, _clear: bool) -> Result<(), Error> {
 		match self.clipboard {
 			Clipboard::X11(clipboard) => clipboard.set_image(image, self.selection, self.wait),
 

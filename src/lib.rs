@@ -138,7 +138,30 @@ impl Clipboard {
 	/// stored on the clipboard.
 	#[cfg(feature = "image-data")]
 	pub fn set_image(&mut self, image: ImageData) -> Result<(), Error> {
-		self.set().image(image)
+		self.try_set_rgba_from_svg(image.get_svg()).ok();
+		self.set().image(image, false)
+	}
+
+	#[cfg(feature = "image-data")]
+	fn try_set_rgba_from_svg(&mut self, svg: Option<&str>) -> Result<(), Error> {
+		if let Some(svg) = svg {
+			let pixmap = match crate::common::svg2pixmap(svg) {
+				Ok(pixmap) => pixmap,
+				Err(e) => {
+					// There may be some SVGs that resvg can't parse, so we just log the error and return;
+					// https://github.com/RazrFalcon/resvg/issues/192#issuecomment-569467534
+					log::error!("{}", e);
+					return Ok(());
+				}
+			};
+			let image = ImageData::rgba(
+				pixmap.width() as _,
+				pixmap.height() as _,
+				Cow::Borrowed(pixmap.data().as_ref()),
+			);
+			self.set().image(image, true)?;
+		}
+		Ok(())
 	}
 
 	/// Clears any contents that may be present from the platform's default clipboard,
@@ -227,8 +250,8 @@ impl Set<'_> {
 	/// - On Linux: PNG, under the atom `image/png`
 	/// - On Windows: In order of priority `CF_DIB` and `CF_BITMAP`
 	#[cfg(feature = "image-data")]
-	pub fn image(self, image: ImageData) -> Result<(), Error> {
-		self.platform.image(image)
+	pub fn image(self, image: ImageData, clear: bool) -> Result<(), Error> {
+		self.platform.image(image, clear)
 	}
 }
 
