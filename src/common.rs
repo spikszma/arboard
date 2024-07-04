@@ -243,7 +243,9 @@ pub(crate) fn svg2pixmap<'s>(svg: &'s str) -> Result<tiny_skia::Pixmap, usvg::Er
 	opt.fontdb_mut().load_system_fonts();
 	let tree = usvg::Tree::from_data(svg.as_bytes(), &opt)?;
 	let pixmap_size = tree.size().to_int_size();
-	let mut pixmap = tiny_skia::Pixmap::new(pixmap_size.width(), pixmap_size.height()).unwrap();
+	let Some(mut pixmap) = tiny_skia::Pixmap::new(pixmap_size.width(), pixmap_size.height()) else {
+		return Err(usvg::Error::InvalidSize);
+	};
 	resvg::render(&tree, tiny_skia::Transform::default(), &mut pixmap.as_mut());
 	Ok(pixmap)
 }
