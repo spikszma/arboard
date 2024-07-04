@@ -138,30 +138,31 @@ impl Clipboard {
 	/// stored on the clipboard.
 	#[cfg(feature = "image-data")]
 	pub fn set_image(&mut self, image: ImageData) -> Result<(), Error> {
-		self.try_set_rgba_from_svg(image.get_svg()).ok();
-		self.set().image(image, false)
+		if let Some(svg) = image.get_svg() {
+			self.try_set_rgba_from_svg(svg).ok();
+			self.set().image(image, false)
+		} else {
+			self.set().image(image, true)
+		}
 	}
 
 	#[cfg(feature = "image-data")]
-	fn try_set_rgba_from_svg(&mut self, svg: Option<&str>) -> Result<(), Error> {
-		if let Some(svg) = svg {
-			let pixmap = match crate::common::svg2pixmap(svg) {
-				Ok(pixmap) => pixmap,
-				Err(e) => {
-					// There may be some SVGs that resvg can't parse, so we just log the error and return;
-					// https://github.com/RazrFalcon/resvg/issues/192#issuecomment-569467534
-					log::error!("{}", e);
-					return Ok(());
-				}
-			};
-			let image = ImageData::rgba(
-				pixmap.width() as _,
-				pixmap.height() as _,
-				Cow::Borrowed(pixmap.data().as_ref()),
-			);
-			self.set().image(image, true)?;
-		}
-		Ok(())
+	fn try_set_rgba_from_svg(&mut self, svg: &str) -> Result<(), Error> {
+		let pixmap = match crate::common::svg2pixmap(svg) {
+			Ok(pixmap) => pixmap,
+			Err(e) => {
+				// There may be some SVGs that resvg can't parse, so we just log the error and return;
+				// https://github.com/RazrFalcon/resvg/issues/192#issuecomment-569467534
+				log::error!("{}", e);
+				return Ok(());
+			}
+		};
+		let image = ImageData::rgba(
+			pixmap.width() as _,
+			pixmap.height() as _,
+			Cow::Borrowed(pixmap.data().as_ref()),
+		);
+		self.set().image(image, true)
 	}
 
 	/// Clears any contents that may be present from the platform's default clipboard,
