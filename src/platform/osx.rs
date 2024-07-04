@@ -305,21 +305,20 @@ impl<'clipboard> Set<'clipboard> {
 
 	#[cfg(feature = "image-data")]
 	pub(crate) fn image(self, data: ImageData, clear: bool) -> Result<(), Error> {
+		if clear {
+			self.clipboard.clear();
+		}
 		match data {
-			ImageData::Rgba(data) => self.image_pixels(data, clear),
-			ImageData::Svg(data) => self.image_svg(data, clear),
+			ImageData::Rgba(data) => self.image_pixels(data),
+			ImageData::Svg(data) => self.image_svg(data),
 		}
 	}
 
 	#[cfg(feature = "image-data")]
-	pub(crate) fn image_pixels(self, data: ImageRgba, clear: bool) -> Result<(), Error> {
+	pub(crate) fn image_pixels(self, data: ImageRgba) -> Result<(), Error> {
 		let pixels = data.bytes.into();
 		let image = image_from_pixels(pixels, data.width, data.height)
 			.map_err(|_| Error::ConversionFailure)?;
-
-		if clear {
-			self.clipboard.clear();
-		}
 
 		let image_array = NSArray::from_vec(vec![ProtocolObject::from_id(image)]);
 		let success = unsafe { self.clipboard.pasteboard.writeObjects(&image_array) };
@@ -335,11 +334,7 @@ impl<'clipboard> Set<'clipboard> {
 	}
 
 	#[cfg(feature = "image-data")]
-	pub(crate) fn image_svg(self, data: String, clear: bool) -> Result<(), Error> {
-		if clear {
-			self.clipboard.clear();
-		}
-
+	pub(crate) fn image_svg(self, data: String) -> Result<(), Error> {
 		let svg = NSString::from_str(&data);
 		let success = unsafe {
 			self.clipboard
