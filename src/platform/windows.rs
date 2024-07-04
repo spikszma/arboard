@@ -8,10 +8,12 @@ the Apache 2.0 or the MIT license at the licensee's choice. The terms
 and conditions of the chosen license apply to this file.
 */
 
-#[cfg(feature = "image-data")]
-use crate::common::ImageData;
 use crate::common::{private, Error};
+#[cfg(feature = "image-data")]
+use crate::common::{ImageData, ImageRgba};
 use std::{borrow::Cow, marker::PhantomData, thread, time::Duration};
+
+const CFSTR_MIME_SVG_XML: &str = "image/svg+xml";
 
 #[cfg(feature = "image-data")]
 mod image_data {
@@ -54,7 +56,7 @@ mod image_data {
 
 	pub(super) fn add_cf_dibv5(
 		_open_clipboard: OpenClipboard,
-		image: ImageData,
+		image: ImageRgba,
 	) -> Result<(), Error> {
 		// This constant is missing in windows-rs
 		// https://github.com/microsoft/windows-rs/issues/2711
@@ -127,7 +129,7 @@ mod image_data {
 		}
 	}
 
-	pub(super) fn add_png_file(image: &ImageData) -> Result<(), Error> {
+	pub(super) fn add_png_file(image: &ImageRgba) -> Result<(), Error> {
 		// Try encoding the image as PNG.
 		let mut buf = Vec::new();
 		let encoder = PngEncoder::new(&mut buf);
@@ -250,11 +252,7 @@ mod image_data {
 
 			let result_bytes = win_to_rgba(&mut result_bytes);
 
-			let result = ImageData {
-				bytes: Cow::Owned(result_bytes),
-				width: w as usize,
-				height: h as usize,
-			};
+			let result = ImageData::rgba(w as _, h as _, Cow::Owned(result_bytes));
 			Ok(result)
 		}
 	}
@@ -343,7 +341,7 @@ mod image_data {
 	}
 
 	/// Vertically flips the image pixels in memory
-	fn flip_v(image: ImageData) -> ImageData<'static> {
+	fn flip_v(image: ImageRgba) -> ImageRgba<'static> {
 		let w = image.width;
 		let h = image.height;
 
@@ -365,7 +363,7 @@ mod image_data {
 			bytes[b_byte_start..b_byte_end].copy_from_slice(&tmp_a);
 		}
 
-		ImageData { width: image.width, height: image.height, bytes: bytes.into() }
+		ImageRgba { width: image.width, height: image.height, bytes: bytes.into() }
 	}
 
 	/// Converts the ARGB (u32) pixel data into the RGBA (u8) format in-place
@@ -569,9 +567,17 @@ impl<'clipboard> Get<'clipboard> {
 
 	#[cfg(feature = "image-data")]
 	pub(crate) fn image(self) -> Result<ImageData<'static>, Error> {
-		const FORMAT: u32 = clipboard_win::formats::CF_DIBV5;
-
 		let _clipboard_assertion = self.clipboard?;
+
+		match Self::image_svg() {
+			Err(Error::ContentNotAvailable) => Self::image_dibv5(),
+			result => result,
+		}
+	}
+
+	#[cfg(feature = "image-data")]
+	fn image_dibv5() -> Result<ImageData<'static>, Error> {
+		const FORMAT: u32 = clipboard_win::formats::CF_DIBV5;
 
 		if !clipboard_win::is_format_avail(FORMAT) {
 			return Err(Error::ContentNotAvailable);
@@ -583,6 +589,23 @@ impl<'clipboard> Get<'clipboard> {
 			.map_err(|_| Error::unknown("failed to read clipboard image data"))?;
 
 		image_data::read_cf_dibv5(&data)
+	}
+
+	#[cfg(feature = "image-data")]
+	fn image_svg() -> Result<ImageData<'static>, Error> {
+		if let Some(format) = clipboard_win::register_format(CFSTR_MIME_SVG_XML) {
+			let format = format.get();
+			if !clipboard_win::is_format_avail(format) {
+				return Err(Error::ContentNotAvailable);
+			}
+
+			let mut data = Vec::new();
+			clipboard_win::raw::get_vec(format, &mut data)
+				.map_err(|_| Error::unknown("failed to read clipboard image data"))?;
+			Ok(ImageData::Svg(String::from_utf8_lossy(&data).into_owned()))
+		} else {
+			Err(Error::ContentNotAvailable)
+		}
 	}
 }
 
@@ -642,20 +665,44 @@ impl<'clipboard> Set<'clipboard> {
 	}
 
 	#[cfg(feature = "image-data")]
-	pub(crate) fn image(self, image: ImageData) -> Result<(), Error> {
+	pub(crate) fn image(self, image: ImageData, clear: bool) -> Result<(), Error> {
 		let open_clipboard = self.clipboard?;
 
-		if let Err(e) = clipboard_win::raw::empty() {
-			return Err(Error::unknown(format!(
-				"Failed to empty the clipboard. Got error code: {e}"
-			)));
-		};
+		if clear {
+			if let Err(e) = clipboard_win::raw::empty() {
+				return Err(Error::unknown(format!(
+					"Failed to empty the clipboard. Got error code: {e}"
+				)));
+			};
+		}
 
+		match image {
+			ImageData::Rgba(image) => Self::image_rgba(open_clipboard, image),
+			ImageData::Svg(svg) => Self::image_svg(svg),
+		}
+	}
+
+	#[cfg(feature = "image-data")]
+	fn image_rgba(
+		open_clipboard: OpenClipboard<'clipboard>,
+		image: ImageRgba,
+	) -> Result<(), Error> {
 		// XXX: The ordering of these functions is important, as some programs will grab the
 		// first format available. PNGs tend to have better compatibility on Windows, so it is set first.
 		image_data::add_png_file(&image)?;
 		image_data::add_cf_dibv5(open_clipboard, image)?;
 		Ok(())
+	}
+
+	#[cfg(feature = "image-data")]
+	fn image_svg(svg: String) -> Result<(), Error> {
+		if let Some(format) = clipboard_win::register_format(CFSTR_MIME_SVG_XML) {
+			clipboard_win::raw::set_without_clear(format.get(), svg.as_bytes())
+				.map_err(|_| Error::unknown("Failed to set SVG data to clipboard"))?;
+			Ok(())
+		} else {
+			Err(Error::unknown("Failed to register SVG format"))
+		}
 	}
 }
 

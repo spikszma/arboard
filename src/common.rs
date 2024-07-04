@@ -9,6 +9,8 @@ and conditions of the chosen license apply to this file.
 */
 
 #[cfg(feature = "image-data")]
+use resvg::{tiny_skia, usvg};
+#[cfg(feature = "image-data")]
 use std::borrow::Cow;
 
 /// An error that might happen during a clipboard operation.
@@ -96,6 +98,13 @@ impl Error {
 	}
 }
 
+#[cfg(feature = "image-data")]
+#[derive(Debug, Clone)]
+pub enum ImageData<'a> {
+	Rgba(ImageRgba<'a>),
+	Svg(String),
+}
+
 /// Stores pixel data of an image.
 ///
 /// Each element in `bytes` stores the value of a channel of a single pixel.
@@ -108,7 +117,7 @@ impl Error {
 ///
 /// Assigning a `2*1` image would for example look like this
 /// ```
-/// use arboard::ImageData;
+/// use arboard::ImageRgba;
 /// use std::borrow::Cow;
 /// let bytes = [
 ///     // A red pixel
@@ -117,7 +126,7 @@ impl Error {
 ///     // A green pixel
 ///     0, 255, 0, 255,
 /// ];
-/// let img = ImageData {
+/// let img = ImageRgba {
 ///     width: 2,
 ///     height: 1,
 ///     bytes: Cow::from(bytes.as_ref())
@@ -125,7 +134,7 @@ impl Error {
 /// ```
 #[cfg(feature = "image-data")]
 #[derive(Debug, Clone)]
-pub struct ImageData<'a> {
+pub struct ImageRgba<'a> {
 	pub width: usize,
 	pub height: usize,
 	pub bytes: Cow<'a, [u8]>,
@@ -133,6 +142,50 @@ pub struct ImageData<'a> {
 
 #[cfg(feature = "image-data")]
 impl<'a> ImageData<'a> {
+	pub fn rgba(width: usize, height: usize, bytes: Cow<'a, [u8]>) -> Self {
+		ImageData::Rgba(ImageRgba { width, height, bytes })
+	}
+
+	pub fn svg<S: Into<String>>(svg: S) -> Self {
+		ImageData::Svg(svg.into())
+	}
+
+	/// Returns a the bytes field in a way that it's guaranteed to be owned.
+	/// It moves the bytes if they are already owned and clones them if they are borrowed.
+	pub fn into_owned_bytes(self) -> Cow<'static, [u8]> {
+		match self {
+			ImageData::Rgba(p) => p.into_owned_bytes(),
+			ImageData::Svg(s) => Cow::Owned(s.into_bytes()),
+		}
+	}
+
+	/// Returns an image data that is guaranteed to own its bytes.
+	/// It moves the bytes if they are already owned and clones them if they are borrowed.
+	pub fn to_owned_img(&self) -> ImageData<'static> {
+		match self {
+			ImageData::Rgba(p) => ImageData::Rgba(p.to_owned_img()),
+			ImageData::Svg(s) => ImageData::Svg(s.clone()),
+		}
+	}
+
+	/// Returns the bytes of the image data.
+	pub fn bytes(&self) -> &[u8] {
+		match self {
+			ImageData::Rgba(p) => &p.bytes,
+			ImageData::Svg(s) => s.as_bytes(),
+		}
+	}
+
+	pub fn get_svg(&self) -> Option<&str> {
+		match self {
+			ImageData::Rgba(_) => None,
+			ImageData::Svg(s) => Some(s),
+		}
+	}
+}
+
+#[cfg(feature = "image-data")]
+impl<'a> ImageRgba<'a> {
 	/// Returns a the bytes field in a way that it's guaranteed to be owned.
 	/// It moves the bytes if they are already owned and clones them if they are borrowed.
 	pub fn into_owned_bytes(self) -> Cow<'static, [u8]> {
@@ -141,8 +194,8 @@ impl<'a> ImageData<'a> {
 
 	/// Returns an image data that is guaranteed to own its bytes.
 	/// It moves the bytes if they are already owned and clones them if they are borrowed.
-	pub fn to_owned_img(&self) -> ImageData<'static> {
-		ImageData {
+	pub fn to_owned_img(&self) -> ImageRgba<'static> {
+		ImageRgba {
 			width: self.width,
 			height: self.height,
 			bytes: self.bytes.clone().into_owned().into(),
@@ -182,4 +235,17 @@ pub(crate) mod private {
 	impl Sealed for crate::Get<'_> {}
 	impl Sealed for crate::Set<'_> {}
 	impl Sealed for crate::Clear<'_> {}
+}
+
+#[cfg(feature = "image-data")]
+pub(crate) fn svg2pixmap<'s>(svg: &'s str) -> Result<tiny_skia::Pixmap, usvg::Error> {
+	let mut opt = usvg::Options::default();
+	opt.fontdb_mut().load_system_fonts();
+	let tree = usvg::Tree::from_data(svg.as_bytes(), &opt)?;
+	let pixmap_size = tree.size().to_int_size();
+	let Some(mut pixmap) = tiny_skia::Pixmap::new(pixmap_size.width(), pixmap_size.height()) else {
+		return Err(usvg::Error::InvalidSize);
+	};
+	resvg::render(&tree, tiny_skia::Transform::default(), &mut pixmap.as_mut());
+	Ok(pixmap)
 }

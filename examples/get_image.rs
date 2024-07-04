@@ -5,5 +5,14 @@ fn main() {
 
 	let img = ctx.get_image().unwrap();
 
-	println!("Image data is:\n{:?}", img.bytes);
+	match img {
+		arboard::ImageData::Rgba(img) => {
+			println!("Image width is: {}", img.width);
+			println!("Image height is: {}", img.height);
+			println!("Image data is:\n{:?}", img.bytes);
+		}
+		arboard::ImageData::Svg(svg) => {
+			println!("SVG data is:\n{}", svg);
+		}
+	}
 }

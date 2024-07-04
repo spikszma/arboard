@@ -15,8 +15,6 @@ default = ["image-data"]
 image-data = ["core-graphics", "image", "windows-sys"]
 wayland-data-control = ["wl-clipboard-rs"]
 
-[dependencies]
-
 [dev-dependencies]
 env_logger = "0.9.0"
 
@@ -29,7 +27,6 @@ windows-sys = { version = "0.48.0", optional = true, features = [
     "Win32_System_Ole",
 ]}
 clipboard-win = "5.3.1"
-log = "0.4"
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -41,7 +38,6 @@ core-graphics = { version = "0.23", optional = true }
 image = { version = "0.25", optional = true, default-features = false, features = ["tiff"] }
 
 [target.'cfg(all(unix, not(any(target_os="macos", target_os="android", target_os="emscripten"))))'.dependencies]
-log = "0.4"
 x11rb = { version = "0.13" }
 wl-clipboard-rs = { version = "0.9", optional = true }
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
@@ -54,3 +50,7 @@ required-features = ["image-data"]
 [[example]]
 name = "set_image"
 required-features = ["image-data"]
+
+[dependencies]
+resvg = "0.42.0"
+log = "0.4"

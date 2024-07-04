@@ -46,9 +46,9 @@ use x11rb::{
 #[cfg(feature = "image-data")]
 use super::encode_as_png;
 use super::{into_unknown, LinuxClipboardKind, WaitConfig};
-#[cfg(feature = "image-data")]
-use crate::ImageData;
 use crate::{common::ScopeGuard, Error};
+#[cfg(feature = "image-data")]
+use crate::{ImageData, ImageRgba};
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -80,6 +80,8 @@ x11rb::atom_manager! {
 		HTML: b"text/html",
 
 		PNG_MIME: b"image/png",
+
+		SVG_MIME: b"image/svg+xml",
 
 		// This is just some random name for the property on our window, into which
 		// the clipboard owner writes the data we requested.
@@ -909,6 +911,20 @@ impl Clipboard {
 
 	#[cfg(feature = "image-data")]
 	pub(crate) fn get_image(&self, selection: LinuxClipboardKind) -> Result<ImageData<'static>> {
+		let formats = [self.inner.atoms.SVG_MIME, self.inner.atoms.PNG_MIME];
+		let result = self.inner.read(&formats, selection)?;
+		match result.format {
+			atom if atom == self.inner.atoms.SVG_MIME => self.get_image_svg(selection),
+			atom if atom == self.inner.atoms.PNG_MIME => self.get_image_png(selection),
+			_ => Err(Error::ContentNotAvailable),
+		}
+	}
+
+	#[cfg(feature = "image-data")]
+	pub(crate) fn get_image_png(
+		&self,
+		selection: LinuxClipboardKind,
+	) -> Result<ImageData<'static>> {
 		let formats = [self.inner.atoms.PNG_MIME];
 		let bytes = self.inner.read(&formats, selection)?.bytes;
 
@@ -920,9 +936,19 @@ impl Clipboard {
 			Err(_e) => return Err(Error::ConversionFailure),
 		};
 		let (w, h) = image.dimensions();
-		let image_data =
-			ImageData { width: w as usize, height: h as usize, bytes: image.into_raw().into() };
+		let image_data = ImageData::rgba(w as _, h as _, image.into_raw().into());
 		Ok(image_data)
+	}
+
+	#[cfg(feature = "image-data")]
+	pub(crate) fn get_image_svg(
+		&self,
+		selection: LinuxClipboardKind,
+	) -> Result<ImageData<'static>> {
+		let formats = [self.inner.atoms.SVG_MIME];
+		let bytes = self.inner.read(&formats, selection)?.bytes;
+		let svg = String::from_utf8(bytes).map_err(|_| Error::ConversionFailure)?;
+		Ok(ImageData::svg(svg))
 	}
 
 	#[cfg(feature = "image-data")]
@@ -932,9 +958,36 @@ impl Clipboard {
 		selection: LinuxClipboardKind,
 		wait: WaitConfig,
 	) -> Result<()> {
+		match image {
+			ImageData::Rgba(data) => self.set_image_png(data, selection, wait),
+			ImageData::Svg(svg) => self.set_image_svg(svg, selection, wait),
+		}
+	}
+
+	#[cfg(feature = "image-data")]
+	pub(crate) fn set_image_png(
+		&self,
+		image: ImageRgba,
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<()> {
 		let encoded = encode_as_png(&image)?;
 		let data = vec![ClipboardData { bytes: encoded, format: self.inner.atoms.PNG_MIME }];
 		self.inner.write(data, selection, wait)
+	}
+
+	#[cfg(feature = "image-data")]
+	pub(crate) fn set_image_svg(
+		&self,
+		svg: String,
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<()> {
+		let data = vec![ClipboardData {
+			bytes: svg.clone().into_bytes(),
+			format: self.inner.atoms.SVG_MIME,
+		}];
+		self.inner.write(data, selection, wait.clone())
 	}
 }
 

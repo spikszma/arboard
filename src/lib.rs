@@ -14,7 +14,7 @@ use std::borrow::Cow;
 
 pub use common::Error;
 #[cfg(feature = "image-data")]
-pub use common::ImageData;
+pub use common::{ImageData, ImageRgba};
 
 mod platform;
 
@@ -138,7 +138,30 @@ impl Clipboard {
 	/// stored on the clipboard.
 	#[cfg(feature = "image-data")]
 	pub fn set_image(&mut self, image: ImageData) -> Result<(), Error> {
-		self.set().image(image)
+		self.try_set_rgba_from_svg(image.get_svg()).ok();
+		self.set().image(image, false)
+	}
+
+	#[cfg(feature = "image-data")]
+	fn try_set_rgba_from_svg(&mut self, svg: Option<&str>) -> Result<(), Error> {
+		if let Some(svg) = svg {
+			let pixmap = match crate::common::svg2pixmap(svg) {
+				Ok(pixmap) => pixmap,
+				Err(e) => {
+					// There may be some SVGs that resvg can't parse, so we just log the error and return;
+					// https://github.com/RazrFalcon/resvg/issues/192#issuecomment-569467534
+					log::error!("{}", e);
+					return Ok(());
+				}
+			};
+			let image = ImageData::rgba(
+				pixmap.width() as _,
+				pixmap.height() as _,
+				Cow::Borrowed(pixmap.data().as_ref()),
+			);
+			self.set().image(image, true)?;
+		}
+		Ok(())
 	}
 
 	/// Clears any contents that may be present from the platform's default clipboard,
@@ -227,8 +250,8 @@ impl Set<'_> {
 	/// - On Linux: PNG, under the atom `image/png`
 	/// - On Windows: In order of priority `CF_DIB` and `CF_BITMAP`
 	#[cfg(feature = "image-data")]
-	pub fn image(self, image: ImageData) -> Result<(), Error> {
-		self.platform.image(image)
+	pub fn image(self, image: ImageData, clear: bool) -> Result<(), Error> {
+		self.platform.image(image, clear)
 	}
 }
 
@@ -329,7 +352,7 @@ mod tests {
 				100, 100, 255, 100,
 				0, 0, 0, 255,
 			];
-			let img_data = ImageData { width: 2, height: 2, bytes: bytes.as_ref().into() };
+			let img_data = ImageData::rgba(2, 2, Cow::from(bytes.as_ref()));
 
 			// Make sure that setting one format overwrites the other.
 			ctx.set_image(img_data.clone()).unwrap();
@@ -341,7 +364,7 @@ mod tests {
 			// Test if we get the same image that we put onto the clipboard
 			ctx.set_image(img_data.clone()).unwrap();
 			let got = ctx.get_image().unwrap();
-			assert_eq!(img_data.bytes, got.bytes);
+			assert_eq!(img_data.bytes(), got.bytes());
 
 			#[rustfmt::skip]
 			let big_bytes = vec![
@@ -354,10 +377,10 @@ mod tests {
 				0, 1, 2, 255,
 			];
 			let bytes_cloned = big_bytes.clone();
-			let big_img_data = ImageData { width: 3, height: 2, bytes: big_bytes.into() };
+			let big_img_data = ImageData::rgba(3, 2, Cow::from(bytes.as_ref()));
 			ctx.set_image(big_img_data).unwrap();
 			let got = ctx.get_image().unwrap();
-			assert_eq!(bytes_cloned.as_slice(), got.bytes.as_ref());
+			assert_eq!(bytes_cloned.as_slice(), got.bytes().as_ref());
 		}
 		#[cfg(all(
 			unix,

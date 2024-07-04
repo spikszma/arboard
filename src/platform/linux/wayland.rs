@@ -12,10 +12,12 @@ use super::encode_as_png;
 use super::{into_unknown, LinuxClipboardKind, WaitConfig};
 use crate::common::Error;
 #[cfg(feature = "image-data")]
-use crate::common::ImageData;
+use crate::common::{ImageData, ImageRgba};
 
 #[cfg(feature = "image-data")]
 const MIME_PNG: &str = "image/png";
+#[cfg(feature = "image-data")]
+const MIME_SVG: &str = "image/svg+xml";
 
 pub(crate) struct Clipboard {}
 
@@ -126,6 +128,17 @@ impl Clipboard {
 		&mut self,
 		selection: LinuxClipboardKind,
 	) -> Result<ImageData<'static>, Error> {
+		match self.get_image_svg(selection) {
+			Err(Error::ContentNotAvailable) => self.get_image_png(selection),
+			result => result,
+		}
+	}
+
+	#[cfg(feature = "image-data")]
+	pub(crate) fn get_image_png(
+		&mut self,
+		selection: LinuxClipboardKind,
+	) -> Result<ImageData<'static>, Error> {
 		use std::io::Cursor;
 		use wl_clipboard_rs::paste::MimeType;
 
@@ -142,11 +155,36 @@ impl Clipboard {
 					.map_err(|_| Error::ConversionFailure)?;
 				let image = image.into_rgba8();
 
-				Ok(ImageData {
-					width: image.width() as usize,
-					height: image.height() as usize,
-					bytes: image.into_raw().into(),
-				})
+				Ok(ImageData::rgba(
+					image.width() as usize,
+					image.height() as usize,
+					image.into_raw().into(),
+				))
+			}
+
+			Err(PasteError::ClipboardEmpty) | Err(PasteError::NoMimeType) => {
+				Err(Error::ContentNotAvailable)
+			}
+
+			Err(err) => Err(Error::Unknown { description: err.to_string() }),
+		}
+	}
+
+	#[cfg(feature = "image-data")]
+	pub(crate) fn get_image_svg(
+		&mut self,
+		selection: LinuxClipboardKind,
+	) -> Result<ImageData<'static>, Error> {
+		use std::io::Cursor;
+		use wl_clipboard_rs::paste::MimeType;
+
+		let result =
+			get_contents(selection.try_into()?, Seat::Unspecified, MimeType::Specific(MIME_SVG));
+		match result {
+			Ok((mut pipe, _mime_type)) => {
+				let mut buffer = vec![];
+				pipe.read_to_end(&mut buffer).map_err(into_unknown)?;
+				Ok(ImageData::svg(String::from_utf8(buffer).map_err(|_| Error::ConversionFailure)?))
 			}
 
 			Err(PasteError::ClipboardEmpty) | Err(PasteError::NoMimeType) => {
@@ -164,6 +202,19 @@ impl Clipboard {
 		selection: LinuxClipboardKind,
 		wait: WaitConfig,
 	) -> Result<(), Error> {
+		match image {
+			ImageData::Rgba(image) => self.set_image_png(image, selection, wait),
+			ImageData::Svg(svg) => self.set_image_svg(svg, selection, wait),
+		}
+	}
+
+	#[cfg(feature = "image-data")]
+	pub(crate) fn set_image_png(
+		&mut self,
+		image: ImageRgba,
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<(), Error> {
 		let image = encode_as_png(&image)?;
 		let mut opts = Options::new();
 		opts.foreground(matches!(wait, WaitConfig::Forever));
@@ -171,5 +222,19 @@ impl Clipboard {
 		let source = Source::Bytes(image.into());
 		opts.copy(source, MimeType::Specific(MIME_PNG.into())).map_err(into_unknown)?;
 		Ok(())
+	}
+
+	#[cfg(feature = "image-data")]
+	pub(crate) fn set_image_svg(
+		&mut self,
+		svg: String,
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<(), Error> {
+		let mut opts = Options::new();
+		opts.foreground(matches!(wait, WaitConfig::Forever));
+		opts.clipboard(selection.try_into()?);
+		let source = Source::Bytes(svg.clone().into_bytes().into_boxed_slice());
+		opts.copy(source, MimeType::Specific(MIME_SVG.into())).map_err(into_unknown)
 	}
 }

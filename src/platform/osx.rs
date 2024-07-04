@@ -10,7 +10,7 @@ and conditions of the chosen license apply to this file.
 
 use crate::common::Error;
 #[cfg(feature = "image-data")]
-use crate::common::ImageData;
+use crate::common::{ImageData, ImageRgba};
 use objc2::{
 	msg_send_id,
 	rc::{autoreleasepool, Id},
@@ -23,6 +23,8 @@ use std::{
 	borrow::Cow,
 	panic::{RefUnwindSafe, UnwindSafe},
 };
+
+const NS_PASTEBOARD_TYPE_SVG: &str = "public.svg-image";
 
 /// Returns an NSImage object on success.
 #[cfg(feature = "image-data")]
@@ -207,6 +209,14 @@ impl<'clipboard> Get<'clipboard> {
 
 	#[cfg(feature = "image-data")]
 	pub(crate) fn image(self) -> Result<ImageData<'static>, Error> {
+		match self.image_svg() {
+			Err(Error::ContentNotAvailable) => self.image_tiff(),
+			result => result,
+		}
+	}
+
+	#[cfg(feature = "image-data")]
+	fn image_tiff(&self) -> Result<ImageData<'static>, Error> {
 		use objc2_app_kit::NSPasteboardTypeTIFF;
 		use std::io::Cursor;
 
@@ -225,10 +235,17 @@ impl<'clipboard> Get<'clipboard> {
 		let rgba = image.into_rgba8();
 		let (width, height) = rgba.dimensions();
 
-		Ok(ImageData {
-			width: width as usize,
-			height: height as usize,
-			bytes: rgba.into_raw().into(),
+		Ok(ImageData::rgba(width as _, height as _, rgba.into_raw().into()))
+	}
+
+	#[cfg(feature = "image-data")]
+	fn image_svg(&self) -> Result<ImageData<'static>, Error> {
+		autoreleasepool(|_| {
+			let image_data = unsafe {
+				self.clipboard.pasteboard.stringForType(&NSString::from_str(NS_PASTEBOARD_TYPE_SVG))
+			}
+			.ok_or(Error::ContentNotAvailable)?;
+			Ok(ImageData::Svg(image_data.to_string()))
 		})
 	}
 }
@@ -287,12 +304,22 @@ impl<'clipboard> Set<'clipboard> {
 	}
 
 	#[cfg(feature = "image-data")]
-	pub(crate) fn image(self, data: ImageData) -> Result<(), Error> {
+	pub(crate) fn image(self, data: ImageData, clear: bool) -> Result<(), Error> {
+		match data {
+			ImageData::Rgba(data) => self.image_pixels(data, clear),
+			ImageData::Svg(data) => self.image_svg(data, clear),
+		}
+	}
+
+	#[cfg(feature = "image-data")]
+	pub(crate) fn image_pixels(self, data: ImageRgba, clear: bool) -> Result<(), Error> {
 		let pixels = data.bytes.into();
 		let image = image_from_pixels(pixels, data.width, data.height)
 			.map_err(|_| Error::ConversionFailure)?;
 
-		self.clipboard.clear();
+		if clear {
+			self.clipboard.clear();
+		}
 
 		let image_array = NSArray::from_vec(vec![ProtocolObject::from_id(image)]);
 		let success = unsafe { self.clipboard.pasteboard.writeObjects(&image_array) };
@@ -303,6 +330,27 @@ impl<'clipboard> Set<'clipboard> {
 				description:
 					"Failed to write the image to the pasteboard (`writeObjects` returned NO)."
 						.into(),
+			})
+		}
+	}
+
+	#[cfg(feature = "image-data")]
+	pub(crate) fn image_svg(self, data: String, clear: bool) -> Result<(), Error> {
+		if clear {
+			self.clipboard.clear();
+		}
+
+		let svg = NSString::from_str(&data);
+		let success = unsafe {
+			self.clipboard
+				.pasteboard
+				.setString_forType(&svg, &NSString::from_str(NS_PASTEBOARD_TYPE_SVG))
+		};
+		if success {
+			Ok(())
+		} else {
+			Err(Error::Unknown {
+				description: "Failed to write the SVG image to the pasteboard.".into(),
 			})
 		}
 	}
