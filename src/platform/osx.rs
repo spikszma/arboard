@@ -207,6 +207,25 @@ impl<'clipboard> Get<'clipboard> {
 		})
 	}
 
+	pub(crate) fn html(self) -> Result<String, Error> {
+		autoreleasepool(|_| {
+			let contents =
+				unsafe { self.clipboard.pasteboard.pasteboardItems() }.ok_or_else(|| {
+					Error::Unknown {
+						description: String::from("NSPasteboard#pasteboardItems errored"),
+					}
+				})?;
+
+			for item in contents {
+				if let Some(string) = unsafe { item.stringForType(NSPasteboardTypeHTML) } {
+					return Ok(string.to_string());
+				}
+			}
+
+			Err(Error::ContentNotAvailable)
+		})
+	}
+
 	#[cfg(feature = "image-data")]
 	pub(crate) fn image(self) -> Result<ImageData<'static>, Error> {
 		match self.image_svg() {

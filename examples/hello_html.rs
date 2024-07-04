@@ -5,6 +5,8 @@ fn main() {
 	env_logger::init();
 	let mut ctx = Clipboard::new().unwrap();
 
+	println!("Clipboard html was: {:?}\n", ctx.get_html());
+
 	let html = r#"<h1>Hello, World!</h1>
 <b>Lorem ipsum</b> dolor sit amet,<br>
 <i>consectetur adipiscing elit</i>."#;
@@ -14,5 +16,6 @@ Lorem ipsum dolor sit amet,
 consectetur adipiscing elit."#;
 
 	ctx.set_html(html, Some(alt_text)).unwrap();
-	thread::sleep(Duration::from_secs(5));
+	println!("But later the clipboard html should be:\n\n{}", html);
+	thread::sleep(Duration::from_secs(1));
 }

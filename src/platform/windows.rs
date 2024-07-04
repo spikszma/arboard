@@ -8,6 +8,8 @@ the Apache 2.0 or the MIT license at the licensee's choice. The terms
 and conditions of the chosen license apply to this file.
 */
 
+use clipboard_win::{formats::Html, Getter};
+
 use crate::common::{private, Error};
 #[cfg(feature = "image-data")]
 use crate::common::{ImageData, ImageRgba};
@@ -563,6 +565,21 @@ impl<'clipboard> Get<'clipboard> {
 
 		// Create a UTF-8 string from WTF-16 data, if it was valid.
 		String::from_utf16(&out[..bytes_read]).map_err(|_| Error::ConversionFailure)
+	}
+
+	pub(crate) fn html(self) -> Result<String, Error> {
+		let _clipboard_assertion = self.clipboard?;
+
+		match Html::new() {
+			Some(h) => {
+				let mut out = Vec::new();
+				let _s = h
+					.read_clipboard(&mut out)
+					.map_err(|_| Error::unknown("failed to read clipboard HTML"))?;
+				String::from_utf8(out).map_err(|_| Error::ConversionFailure)
+			}
+			None => Err(Error::ContentNotAvailable),
+		}
 	}
 
 	#[cfg(feature = "image-data")]

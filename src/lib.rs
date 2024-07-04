@@ -94,6 +94,15 @@ impl Clipboard {
 		self.set().text(text)
 	}
 
+	/// Fetches UTF-8 html from the clipboard and returns it.
+	///
+	/// # Errors
+	///
+	/// Returns error if clipboard is empty or contents are not UTF-8 html.
+	pub fn get_html(&mut self) -> Result<String, Error> {
+		self.get().html()
+	}
+
 	/// Places the HTML as well as a plain-text alternative onto the clipboard.
 	///
 	/// Any valid UTF-8 string is accepted.
@@ -201,6 +210,11 @@ impl Get<'_> {
 	/// Completes the "get" operation by fetching UTF-8 text from the clipboard.
 	pub fn text(self) -> Result<String, Error> {
 		self.platform.text()
+	}
+
+	/// Completes the "get" operation by fetching UTF-8 html from the clipboard.
+	pub fn html(self) -> Result<String, Error> {
+		self.platform.html()
 	}
 
 	/// Completes the "get" operation by fetching image data from the clipboard and returning the

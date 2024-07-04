@@ -18,6 +18,7 @@ use crate::common::{ImageData, ImageRgba};
 const MIME_PNG: &str = "image/png";
 #[cfg(feature = "image-data")]
 const MIME_SVG: &str = "image/svg+xml";
+const MIME_HTML: &'static str = "text/html";
 
 pub(crate) struct Clipboard {}
 
@@ -56,24 +57,7 @@ impl Clipboard {
 	}
 
 	pub(crate) fn get_text(&mut self, selection: LinuxClipboardKind) -> Result<String, Error> {
-		use wl_clipboard_rs::paste::MimeType;
-
-		let result = get_contents(selection.try_into()?, Seat::Unspecified, MimeType::Text);
-		match result {
-			Ok((mut pipe, _)) => {
-				let mut contents = vec![];
-				pipe.read_to_end(&mut contents).map_err(into_unknown)?;
-				String::from_utf8(contents).map_err(|_| Error::ConversionFailure)
-			}
-
-			Err(PasteError::ClipboardEmpty) | Err(PasteError::NoMimeType) => {
-				Err(Error::ContentNotAvailable)
-			}
-
-			Err(PasteError::PrimarySelectionUnsupported) => Err(Error::ClipboardNotSupported),
-
-			Err(err) => Err(Error::Unknown { description: err.to_string() }),
-		}
+		self.get_plain(selection, wl_clipboard_rs::paste::MimeType::Text)
 	}
 
 	pub(crate) fn set_text(
@@ -93,6 +77,33 @@ impl Clipboard {
 		Ok(())
 	}
 
+	pub(crate) fn get_html(&mut self, selection: LinuxClipboardKind) -> Result<String, Error> {
+		self.get_plain(selection, wl_clipboard_rs::paste::MimeType::Specific(MIME_HTML))
+	}
+
+	fn get_plain(
+		&mut self,
+		selection: LinuxClipboardKind,
+		mime_type: wl_clipboard_rs::paste::MimeType,
+	) -> Result<String, Error> {
+		let result = get_contents(selection.try_into()?, Seat::Unspecified, mime_type);
+		match result {
+			Ok((mut pipe, _)) => {
+				let mut contents = vec![];
+				pipe.read_to_end(&mut contents).map_err(into_unknown)?;
+				String::from_utf8(contents).map_err(|_| Error::ConversionFailure)
+			}
+
+			Err(PasteError::ClipboardEmpty) | Err(PasteError::NoMimeType) => {
+				Err(Error::ContentNotAvailable)
+			}
+
+			Err(PasteError::PrimarySelectionUnsupported) => Err(Error::ClipboardNotSupported),
+
+			Err(err) => Err(Error::Unknown { description: err.to_string() }),
+		}
+	}
+
 	pub(crate) fn set_html(
 		&self,
 		html: Cow<'_, str>,
@@ -100,7 +111,7 @@ impl Clipboard {
 		selection: LinuxClipboardKind,
 		wait: WaitConfig,
 	) -> Result<(), Error> {
-		let html_mime = MimeType::Specific(String::from("text/html"));
+		let html_mime = MimeType::Specific(String::from(MIME_HTML));
 		let mut opts = Options::new();
 		opts.foreground(matches!(wait, WaitConfig::Forever));
 		opts.clipboard(selection.try_into()?);
@@ -175,7 +186,6 @@ impl Clipboard {
 		&mut self,
 		selection: LinuxClipboardKind,
 	) -> Result<ImageData<'static>, Error> {
-		use std::io::Cursor;
 		use wl_clipboard_rs::paste::MimeType;
 
 		let result =

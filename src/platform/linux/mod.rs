@@ -114,6 +114,14 @@ impl<'clipboard> Get<'clipboard> {
 		}
 	}
 
+	pub(crate) fn html(self) -> Result<String, Error> {
+		match self.clipboard {
+			Clipboard::X11(clipboard) => clipboard.get_html(self.selection),
+			#[cfg(feature = "wayland-data-control")]
+			Clipboard::WlDataControl(clipboard) => clipboard.get_html(self.selection),
+		}
+	}
+
 	#[cfg(feature = "image-data")]
 	pub(crate) fn image(self) -> Result<ImageData<'static>, Error> {
 		match self.clipboard {
