@@ -995,6 +995,44 @@ impl Clipboard {
 		}];
 		self.inner.write(data, selection, wait.clone())
 	}
+
+	pub(crate) fn get_special(
+		&self,
+		format_name: &str,
+		selection: LinuxClipboardKind,
+	) -> Result<Vec<u8>, Error> {
+		let atom = self
+			.inner
+			.server
+			.conn
+			.intern_atom(false, format_name.as_bytes())
+			.map_err(into_unknown)?
+			.reply()
+			.map_err(into_unknown)?
+			.atom;
+		let formats = [atom];
+		self.inner.read(&formats, selection).map(|data| data.bytes)
+	}
+
+	pub(crate) fn set_special(
+		&self,
+		format_name: &str,
+		data: &[u8],
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<()> {
+		let atom = self
+			.inner
+			.server
+			.conn
+			.intern_atom(false, format_name.as_bytes())
+			.map_err(into_unknown)?
+			.reply()
+			.map_err(into_unknown)?
+			.atom;
+		let data = vec![ClipboardData { bytes: data.to_vec(), format: atom }];
+		self.inner.write(data, selection, wait)
+	}
 }
 
 impl Drop for Clipboard {

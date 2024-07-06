@@ -174,6 +174,14 @@ impl Clipboard {
 		self.set().image(image, true)
 	}
 
+	pub fn get_special(&mut self, format_name: &str) -> Result<Vec<u8>, Error> {
+		self.get().special(format_name)
+	}
+
+	pub fn set_special(&mut self, format_name: &str, data: &[u8]) -> Result<(), Error> {
+		self.set().special(format_name, data)
+	}
+
 	/// Clears any contents that may be present from the platform's default clipboard,
 	/// regardless of the format of the data.
 	///
@@ -227,6 +235,10 @@ impl Get<'_> {
 	pub fn image(self) -> Result<ImageData<'static>, Error> {
 		self.platform.image()
 	}
+
+	pub fn special(self, format_name: &str) -> Result<Vec<u8>, Error> {
+		self.platform.special(format_name)
+	}
 }
 
 /// A builder for an operation that sets a value to the clipboard.
@@ -267,6 +279,10 @@ impl Set<'_> {
 	#[cfg(feature = "image-data")]
 	pub fn image(self, image: ImageData, clear: bool) -> Result<(), Error> {
 		self.platform.image(image, clear)
+	}
+
+	pub fn special(self, format_name: &str, data: &[u8]) -> Result<(), Error> {
+		self.platform.special(format_name, data)
 	}
 }
 

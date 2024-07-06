@@ -247,4 +247,46 @@ impl Clipboard {
 		let source = Source::Bytes(svg.clone().into_bytes().into_boxed_slice());
 		opts.copy(source, MimeType::Specific(MIME_SVG.into())).map_err(into_unknown)
 	}
+
+	pub(crate) fn get_special(
+		&self,
+		format_name: &str,
+		selection: LinuxClipboardKind,
+	) -> Result<Vec<u8>, Error> {
+		use wl_clipboard_rs::paste::MimeType;
+
+		let result =
+			get_contents(selection.try_into()?, Seat::Unspecified, MimeType::Specific(format_name));
+		match result {
+			Ok((mut pipe, _mime_type)) => {
+				let mut buffer = vec![];
+				pipe.read_to_end(&mut buffer).map_err(into_unknown)?;
+				Ok(buffer)
+			}
+
+			Err(PasteError::ClipboardEmpty) | Err(PasteError::NoMimeType) => {
+				Err(Error::ContentNotAvailable)
+			}
+
+			Err(err) => Err(Error::Unknown { description: err.to_string() }),
+		}
+	}
+
+	pub(crate) fn set_special(
+		&self,
+		format_name: &str,
+		data: &[u8],
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<(), Error> {
+		let format_mime = MimeType::Specific(String::from(format_name));
+		let mut opts = Options::new();
+		opts.foreground(matches!(wait, WaitConfig::Forever));
+		opts.clipboard(selection.try_into()?);
+		opts.copy(Source::Bytes(data.into()), format_mime).map_err(|e| match e {
+			CopyError::PrimarySelectionUnsupported => Error::ClipboardNotSupported,
+			other => into_unknown(other),
+		})?;
+		Ok(())
+	}
 }

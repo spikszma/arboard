@@ -624,6 +624,22 @@ impl<'clipboard> Get<'clipboard> {
 			Err(Error::ContentNotAvailable)
 		}
 	}
+
+	pub(crate) fn special(self, format_name: &str) -> Result<Vec<u8>, Error> {
+		let _clipboard_assertion = self.clipboard?;
+
+		let format = clipboard_win::register_format(format_name)
+			.ok_or_else(|| Error::unknown("failed to register clipboard format"))?;
+
+		if !clipboard_win::is_format_avail(format.get()) {
+			return Err(Error::ContentNotAvailable);
+		}
+
+		let mut data = Vec::new();
+		clipboard_win::raw::get_vec(format.get(), &mut data)
+			.map_err(|_| Error::unknown("failed to read clipboard data"))?;
+		Ok(data)
+	}
 }
 
 pub(crate) struct Set<'clipboard> {
@@ -720,6 +736,29 @@ impl<'clipboard> Set<'clipboard> {
 		} else {
 			Err(Error::unknown("Failed to register SVG format"))
 		}
+	}
+
+	pub(crate) fn special(self, format_name: &str, data: &[u8]) -> Result<(), Error> {
+		let open_clipboard = self.clipboard?;
+
+		// if let Err(e) = clipboard_win::raw::empty() {
+		// 	return Err(Error::unknown(format!(
+		// 		"Failed to empty the clipboard. Got error code: {e}"
+		// 	)));
+		// };
+
+		let format = clipboard_win::register_format(format_name)
+			.ok_or_else(|| Error::unknown("failed to register clipboard format"))?;
+
+		clipboard_win::raw::set(format.get(), data)
+			.map_err(|_| Error::unknown("failed to set clipboard data"))?;
+
+		add_clipboard_exclusions(
+			open_clipboard,
+			self.exclude_from_monitoring,
+			self.exclude_from_cloud,
+			self.exclude_from_history,
+		)
 	}
 }
 

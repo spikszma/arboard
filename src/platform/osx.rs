@@ -12,15 +12,16 @@ use crate::common::Error;
 #[cfg(feature = "image-data")]
 use crate::common::{ImageData, ImageRgba};
 use objc2::{
-	msg_send_id,
+	class, msg_send, msg_send_id,
 	rc::{autoreleasepool, Id},
 	runtime::ProtocolObject,
 	ClassType,
 };
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeHTML, NSPasteboardTypeString};
-use objc2_foundation::{NSArray, NSString};
+use objc2_foundation::{NSArray, NSData, NSString};
 use std::{
 	borrow::Cow,
+	os::raw::c_void,
 	panic::{RefUnwindSafe, UnwindSafe},
 };
 
@@ -267,6 +268,25 @@ impl<'clipboard> Get<'clipboard> {
 			Ok(ImageData::Svg(image_data.to_string()))
 		})
 	}
+
+	pub(crate) fn special(self, format_name: &str) -> Result<Vec<u8>, Error> {
+		autoreleasepool(|_| {
+			let contents =
+				unsafe { self.clipboard.pasteboard.pasteboardItems() }.ok_or_else(|| {
+					Error::Unknown {
+						description: String::from("NSPasteboard#pasteboardItems errored"),
+					}
+				})?;
+
+			for item in contents {
+				if let Some(data) = unsafe { item.dataForType(&NSString::from_str(format_name)) } {
+					return Ok(data.bytes().to_vec());
+				}
+			}
+
+			Err(Error::ContentNotAvailable)
+		})
+	}
 }
 
 pub(crate) struct Set<'clipboard> {
@@ -366,6 +386,38 @@ impl<'clipboard> Set<'clipboard> {
 			Err(Error::Unknown {
 				description: "Failed to write the SVG image to the pasteboard.".into(),
 			})
+		}
+	}
+
+	fn convert_slice_to_nsdata(slice: &[u8]) -> Option<&NSData> {
+		unsafe {
+			let nsdata_class = class!(NSData);
+			let bytes: *const c_void = slice.as_ptr() as *const c_void;
+			let length = slice.len() as u64;
+
+			// Create NSData from bytes
+			let nsdata: *const objc2_foundation::NSData =
+				msg_send![nsdata_class, dataWithBytes:bytes as *const c_void length:length as u64];
+			if nsdata.is_null() {
+				None
+			} else {
+				Some(&*(nsdata as *const NSData))
+			}
+		}
+	}
+
+	pub(crate) fn special(self, format_name: &str, data: &[u8]) -> Result<(), Error> {
+		self.clipboard.clear();
+		let success = unsafe {
+			self.clipboard.pasteboard.setData_forType(
+				Self::convert_slice_to_nsdata(data),
+				&NSString::from_str(format_name),
+			)
+		};
+		if success {
+			Ok(())
+		} else {
+			Err(Error::Unknown { description: "NSPasteboard#writeObjects: returned false".into() })
 		}
 	}
 }
