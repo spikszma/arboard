@@ -10,7 +10,7 @@ use wl_clipboard_rs::{
 #[cfg(feature = "image-data")]
 use super::encode_as_png;
 use super::{into_unknown, LinuxClipboardKind, WaitConfig};
-use crate::common::Error;
+use crate::common::{ClipboardData, ClipboardFormat, Error};
 #[cfg(feature = "image-data")]
 use crate::common::{ImageData, ImageRgba};
 
@@ -19,6 +19,7 @@ const MIME_PNG: &str = "image/png";
 #[cfg(feature = "image-data")]
 const MIME_SVG: &str = "image/svg+xml";
 const MIME_HTML: &'static str = "text/html";
+const MIME_RTF: &'static str = "text/rtf";
 
 pub(crate) struct Clipboard {}
 
@@ -56,6 +57,36 @@ impl Clipboard {
 		Ok(Self {})
 	}
 
+	fn set_source(
+		&self,
+		source: MimeSource,
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<(), Error> {
+		let mut opts = Options::new();
+		opts.foreground(matches!(wait, WaitConfig::Forever));
+		opts.clipboard(selection.try_into()?);
+		opts.copy(source.source, source.mime_type).map_err(|e| match e {
+			CopyError::PrimarySelectionUnsupported => Error::ClipboardNotSupported,
+			other => into_unknown(other),
+		})
+	}
+
+	fn set_multi_source(
+		&self,
+		sources: Vec<MimeSource>,
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<(), Error> {
+		let mut opts = Options::new();
+		opts.foreground(matches!(wait, WaitConfig::Forever));
+		opts.clipboard(selection.try_into()?);
+		opts.copy_multi(sources).map_err(|e| match e {
+			CopyError::PrimarySelectionUnsupported => Error::ClipboardNotSupported,
+			other => into_unknown(other),
+		})
+	}
+
 	pub(crate) fn get_text(&mut self, selection: LinuxClipboardKind) -> Result<String, Error> {
 		self.get_plain(selection, wl_clipboard_rs::paste::MimeType::Text)
 	}
@@ -66,15 +97,34 @@ impl Clipboard {
 		selection: LinuxClipboardKind,
 		wait: WaitConfig,
 	) -> Result<(), Error> {
-		let mut opts = Options::new();
-		opts.foreground(matches!(wait, WaitConfig::Forever));
-		opts.clipboard(selection.try_into()?);
-		let source = Source::Bytes(text.into_owned().into_bytes().into_boxed_slice());
-		opts.copy(source, MimeType::Text).map_err(|e| match e {
-			CopyError::PrimarySelectionUnsupported => Error::ClipboardNotSupported,
-			other => into_unknown(other),
-		})?;
-		Ok(())
+		self.set_source(Self::text_to_mime_source(text), selection, wait)
+	}
+
+	fn text_to_mime_source(text: Cow<'_, str>) -> MimeSource {
+		MimeSource {
+			source: Source::Bytes(text.into_owned().into_bytes().into_boxed_slice()),
+			mime_type: MimeType::Text,
+		}
+	}
+
+	pub(crate) fn get_rtf(&mut self, selection: LinuxClipboardKind) -> Result<String, Error> {
+		self.get_plain(selection, wl_clipboard_rs::paste::MimeType::Specific(MIME_RTF))
+	}
+
+	pub(crate) fn set_rtf(
+		&self,
+		rtf: Cow<'_, str>,
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<(), Error> {
+		self.set_source(Self::rtf_to_mime_source(rtf), selection, wait)
+	}
+
+	fn rtf_to_mime_source(rtf: Cow<'_, str>) -> MimeSource {
+		MimeSource {
+			source: Source::Bytes(rtf.into_owned().into_bytes().into_boxed_slice()),
+			mime_type: MimeType::Specific(String::from(MIME_RTF)),
+		}
 	}
 
 	pub(crate) fn get_html(&mut self, selection: LinuxClipboardKind) -> Result<String, Error> {
@@ -111,27 +161,22 @@ impl Clipboard {
 		selection: LinuxClipboardKind,
 		wait: WaitConfig,
 	) -> Result<(), Error> {
-		let html_mime = MimeType::Specific(String::from(MIME_HTML));
-		let mut opts = Options::new();
-		opts.foreground(matches!(wait, WaitConfig::Forever));
-		opts.clipboard(selection.try_into()?);
-		let html_source = Source::Bytes(html.into_owned().into_bytes().into_boxed_slice());
+		let html_source = Self::html_to_mime_source(html);
 		match alt {
-			Some(alt_text) => {
-				let alt_source =
-					Source::Bytes(alt_text.into_owned().into_bytes().into_boxed_slice());
-				opts.copy_multi(vec![
-					MimeSource { source: alt_source, mime_type: MimeType::Text },
-					MimeSource { source: html_source, mime_type: html_mime },
-				])
-			}
-			None => opts.copy(html_source, html_mime),
+			Some(alt_text) => self.set_multi_source(
+				vec![Self::text_to_mime_source(alt_text), html_source],
+				selection,
+				wait,
+			),
+			None => self.set_source(html_source, selection, wait),
 		}
-		.map_err(|e| match e {
-			CopyError::PrimarySelectionUnsupported => Error::ClipboardNotSupported,
-			other => into_unknown(other),
-		})?;
-		Ok(())
+	}
+
+	fn html_to_mime_source(html: Cow<'_, str>) -> MimeSource {
+		MimeSource {
+			source: Source::Bytes(html.into_owned().into_bytes().into_boxed_slice()),
+			mime_type: MimeType::Specific(String::from(MIME_HTML)),
+		}
 	}
 
 	#[cfg(feature = "image-data")]
@@ -150,7 +195,6 @@ impl Clipboard {
 		&mut self,
 		selection: LinuxClipboardKind,
 	) -> Result<ImageData<'static>, Error> {
-		use std::io::Cursor;
 		use wl_clipboard_rs::paste::MimeType;
 
 		let result =
@@ -159,18 +203,7 @@ impl Clipboard {
 			Ok((mut pipe, _mime_type)) => {
 				let mut buffer = vec![];
 				pipe.read_to_end(&mut buffer).map_err(into_unknown)?;
-				let image = image::io::Reader::new(Cursor::new(buffer))
-					.with_guessed_format()
-					.map_err(|_| Error::ConversionFailure)?
-					.decode()
-					.map_err(|_| Error::ConversionFailure)?;
-				let image = image.into_rgba8();
-
-				Ok(ImageData::rgba(
-					image.width() as usize,
-					image.height() as usize,
-					image.into_raw().into(),
-				))
+				Ok(ImageData::png(buffer.into()))
 			}
 
 			Err(PasteError::ClipboardEmpty) | Err(PasteError::NoMimeType) => {
@@ -213,25 +246,39 @@ impl Clipboard {
 		wait: WaitConfig,
 	) -> Result<(), Error> {
 		match image {
-			ImageData::Rgba(image) => self.set_image_png(image, selection, wait),
+			ImageData::Rgba(image) => self.set_image_rgba(image, selection, wait),
+			ImageData::Png(png) => self.set_image_png(png.to_vec(), selection, wait),
 			ImageData::Svg(svg) => self.set_image_svg(svg, selection, wait),
 		}
 	}
 
 	#[cfg(feature = "image-data")]
-	pub(crate) fn set_image_png(
+	pub(crate) fn set_image_rgba(
 		&mut self,
 		image: ImageRgba,
 		selection: LinuxClipboardKind,
 		wait: WaitConfig,
 	) -> Result<(), Error> {
 		let image = encode_as_png(&image)?;
-		let mut opts = Options::new();
-		opts.foreground(matches!(wait, WaitConfig::Forever));
-		opts.clipboard(selection.try_into()?);
-		let source = Source::Bytes(image.into());
-		opts.copy(source, MimeType::Specific(MIME_PNG.into())).map_err(into_unknown)?;
-		Ok(())
+		self.set_source(Self::png_to_mime_source(image), selection, wait)
+	}
+
+	#[cfg(feature = "image-data")]
+	pub(crate) fn set_image_png(
+		&mut self,
+		png: Vec<u8>,
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<(), Error> {
+		self.set_source(Self::png_to_mime_source(png), selection, wait)
+	}
+
+	#[cfg(feature = "image-data")]
+	fn png_to_mime_source(png: Vec<u8>) -> MimeSource {
+		MimeSource {
+			source: Source::Bytes(png.into_boxed_slice()),
+			mime_type: MimeType::Specific(String::from(MIME_PNG)),
+		}
 	}
 
 	#[cfg(feature = "image-data")]
@@ -241,11 +288,15 @@ impl Clipboard {
 		selection: LinuxClipboardKind,
 		wait: WaitConfig,
 	) -> Result<(), Error> {
-		let mut opts = Options::new();
-		opts.foreground(matches!(wait, WaitConfig::Forever));
-		opts.clipboard(selection.try_into()?);
-		let source = Source::Bytes(svg.clone().into_bytes().into_boxed_slice());
-		opts.copy(source, MimeType::Specific(MIME_SVG.into())).map_err(into_unknown)
+		self.set_source(Self::svg_to_mime_source(svg), selection, wait)
+	}
+
+	#[cfg(feature = "image-data")]
+	fn svg_to_mime_source(svg: String) -> MimeSource {
+		MimeSource {
+			source: Source::Bytes(svg.into_bytes().into_boxed_slice()),
+			mime_type: MimeType::Specific(String::from(MIME_SVG)),
+		}
 	}
 
 	pub(crate) fn get_special(
@@ -279,14 +330,102 @@ impl Clipboard {
 		selection: LinuxClipboardKind,
 		wait: WaitConfig,
 	) -> Result<(), Error> {
-		let format_mime = MimeType::Specific(String::from(format_name));
-		let mut opts = Options::new();
-		opts.foreground(matches!(wait, WaitConfig::Forever));
-		opts.clipboard(selection.try_into()?);
-		opts.copy(Source::Bytes(data.into()), format_mime).map_err(|e| match e {
-			CopyError::PrimarySelectionUnsupported => Error::ClipboardNotSupported,
-			other => into_unknown(other),
-		})?;
-		Ok(())
+		self.set_source(Self::special_to_mime_source(format_name, data), selection, wait)
+	}
+
+	fn special_to_mime_source(format_name: &str, data: &[u8]) -> MimeSource {
+		MimeSource {
+			source: Source::Bytes(data.into()),
+			mime_type: MimeType::Specific(String::from(format_name)),
+		}
+	}
+
+	pub(crate) fn get_formats(
+		&mut self,
+		formats: &[ClipboardFormat],
+		selection: LinuxClipboardKind,
+	) -> Result<Vec<ClipboardData>, Error> {
+		let mut results = Vec::new();
+		for format in formats {
+			match format {
+				ClipboardFormat::Text => match self.get_text(selection) {
+					Ok(text) => results.push(ClipboardData::Text(text)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => return Err(e),
+				},
+				ClipboardFormat::Rtf => match self.get_rtf(selection) {
+					Ok(rtf) => results.push(ClipboardData::Rtf(rtf)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => return Err(e),
+				},
+				ClipboardFormat::Html => match self.get_html(selection) {
+					Ok(html) => results.push(ClipboardData::Html(html)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => return Err(e),
+				},
+				#[cfg(feature = "image-data")]
+				ClipboardFormat::ImageRgba => match self.get_image_png(selection) {
+					Ok(image) => results.push(ClipboardData::Image(image)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => return Err(e),
+				},
+				#[cfg(feature = "image-data")]
+				ClipboardFormat::ImageSvg => match self.get_image_svg(selection) {
+					Ok(image) => results.push(ClipboardData::Image(image)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => return Err(e),
+				},
+				ClipboardFormat::Special(format_name) => {
+					match self.get_special(format_name, selection) {
+						Ok(data) => {
+							results.push(ClipboardData::Special((format_name.to_string(), data)))
+						}
+						Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+						Err(e) => return Err(e),
+					}
+				}
+				_ => results.push(ClipboardData::Unsupported),
+			}
+		}
+		Ok(results)
+	}
+
+	pub(crate) fn set_formats(
+		&self,
+		data: &[ClipboardData],
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<(), Error> {
+		let mut sources = Vec::new();
+		for item in data {
+			match item {
+				ClipboardData::Text(text) => {
+					sources.push(Self::text_to_mime_source(Cow::Borrowed(text)));
+				}
+				ClipboardData::Rtf(rtf) => {
+					sources.push(Self::rtf_to_mime_source(Cow::Borrowed(rtf)));
+				}
+				ClipboardData::Html(html) => {
+					sources.push(Self::html_to_mime_source(Cow::Borrowed(html)));
+				}
+				#[cfg(feature = "image-data")]
+				ClipboardData::Image(image) => match image {
+					ImageData::Rgba(image) => {
+						sources.push(Self::png_to_mime_source(encode_as_png(image)?));
+					}
+					ImageData::Png(png) => {
+						sources.push(Self::png_to_mime_source(png.to_vec()));
+					}
+					ImageData::Svg(svg) => {
+						sources.push(Self::svg_to_mime_source(svg.to_string()));
+					}
+				},
+				ClipboardData::Special((format_name, data)) => {
+					sources.push(Self::special_to_mime_source(format_name, data));
+				}
+				_ => {}
+			}
+		}
+		self.set_multi_source(sources, selection, wait)
 	}
 }

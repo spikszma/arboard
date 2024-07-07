@@ -11,6 +11,9 @@ fn main() {
 			println!("Image height is: {}", img.height);
 			println!("Image data is:\n{:?}", img.bytes);
 		}
+		arboard::ImageData::Png(png) => {
+			println!("PNG data is:\n{:?}", png);
+		}
 		arboard::ImageData::Svg(svg) => {
 			println!("SVG data is:\n{}", svg);
 		}
