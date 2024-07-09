@@ -12,7 +12,7 @@ and conditions of the chosen license apply to this file.
 mod common;
 use std::borrow::Cow;
 
-pub use common::Error;
+pub use common::{ClipboardData, ClipboardFormat, Error};
 #[cfg(feature = "image-data")]
 pub use common::{ImageData, ImageRgba};
 
@@ -94,6 +94,33 @@ impl Clipboard {
 		self.set().text(text)
 	}
 
+	/// Fetches UTF-8 rtf from the clipboard and returns it.
+	///
+	/// # Errors
+	///
+	/// Returns error if clipboard is empty or contents are not UTF-8 rtf.
+	pub fn get_rtf(&mut self) -> Result<String, Error> {
+		self.get().rtf()
+	}
+
+	/// Places the rtf onto the clipboard. Any valid UTF-8 string is accepted.
+	///
+	/// # Errors
+	///
+	/// Returns error if `rtf` failed to be stored on the clipboard.
+	pub fn set_rtf<'a, T: Into<Cow<'a, str>>>(&mut self, rtf: T) -> Result<(), Error> {
+		self.set().rtf(rtf)
+	}
+
+	/// Fetches UTF-8 html from the clipboard and returns it.
+	///
+	/// # Errors
+	///
+	/// Returns error if clipboard is empty or contents are not UTF-8 html.
+	pub fn get_html(&mut self) -> Result<String, Error> {
+		self.get().html()
+	}
+
 	/// Places the HTML as well as a plain-text alternative onto the clipboard.
 	///
 	/// Any valid UTF-8 string is accepted.
@@ -138,31 +165,26 @@ impl Clipboard {
 	/// stored on the clipboard.
 	#[cfg(feature = "image-data")]
 	pub fn set_image(&mut self, image: ImageData) -> Result<(), Error> {
-		if let Some(svg) = image.get_svg() {
-			self.try_set_rgba_from_svg(svg).ok();
-			self.set().image(image, false)
-		} else {
-			self.set().image(image, true)
-		}
+		self.set().image(image)
 	}
 
-	#[cfg(feature = "image-data")]
-	fn try_set_rgba_from_svg(&mut self, svg: &str) -> Result<(), Error> {
-		let pixmap = match crate::common::svg2pixmap(svg) {
-			Ok(pixmap) => pixmap,
-			Err(e) => {
-				// There may be some SVGs that resvg can't parse, so we just log the error and return;
-				// https://github.com/RazrFalcon/resvg/issues/192#issuecomment-569467534
-				log::error!("{}", e);
-				return Ok(());
-			}
-		};
-		let image = ImageData::rgba(
-			pixmap.width() as _,
-			pixmap.height() as _,
-			Cow::Borrowed(pixmap.data().as_ref()),
-		);
-		self.set().image(image, true)
+	pub fn get_special(&mut self, format_name: &str) -> Result<Vec<u8>, Error> {
+		self.get().special(format_name)
+	}
+
+	pub fn set_special(&mut self, format_name: &str, data: &[u8]) -> Result<(), Error> {
+		self.set().special(format_name, data)
+	}
+
+	pub fn get_formats(
+		&mut self,
+		formats: &[ClipboardFormat],
+	) -> Result<Vec<ClipboardData>, Error> {
+		self.get().formats(formats)
+	}
+
+	pub fn set_formats(&mut self, data: &[ClipboardData]) -> Result<(), Error> {
+		self.set().formats(data)
 	}
 
 	/// Clears any contents that may be present from the platform's default clipboard,
@@ -203,6 +225,16 @@ impl Get<'_> {
 		self.platform.text()
 	}
 
+	/// Completes the "get" operation by fetching UTF-8 rtf from the clipboard.
+	pub fn rtf(self) -> Result<String, Error> {
+		self.platform.rtf()
+	}
+
+	/// Completes the "get" operation by fetching UTF-8 html from the clipboard.
+	pub fn html(self) -> Result<String, Error> {
+		self.platform.html()
+	}
+
 	/// Completes the "get" operation by fetching image data from the clipboard and returning the
 	/// decoded pixels.
 	///
@@ -212,6 +244,14 @@ impl Get<'_> {
 	#[cfg(feature = "image-data")]
 	pub fn image(self) -> Result<ImageData<'static>, Error> {
 		self.platform.image()
+	}
+
+	pub fn special(self, format_name: &str) -> Result<Vec<u8>, Error> {
+		self.platform.special(format_name)
+	}
+
+	pub fn formats(self, formats: &[ClipboardFormat]) -> Result<Vec<ClipboardData>, Error> {
+		self.platform.formats(formats)
 	}
 }
 
@@ -227,6 +267,13 @@ impl Set<'_> {
 	pub fn text<'a, T: Into<Cow<'a, str>>>(self, text: T) -> Result<(), Error> {
 		let text = text.into();
 		self.platform.text(text)
+	}
+
+	/// Completes the "set" operation by placing rtf onto the clipboard. Any valid UTF-8 string
+	/// is accepted.
+	pub fn rtf<'a, T: Into<Cow<'a, str>>>(self, rtf: T) -> Result<(), Error> {
+		let rtf = rtf.into();
+		self.platform.rtf(rtf)
 	}
 
 	/// Completes the "set" operation by placing HTML as well as a plain-text alternative onto the
@@ -251,8 +298,16 @@ impl Set<'_> {
 	/// - On Linux: PNG, under the atom `image/png`
 	/// - On Windows: In order of priority `CF_DIB` and `CF_BITMAP`
 	#[cfg(feature = "image-data")]
-	pub fn image(self, image: ImageData, clear: bool) -> Result<(), Error> {
-		self.platform.image(image, clear)
+	pub fn image(self, image: ImageData) -> Result<(), Error> {
+		self.platform.image(image)
+	}
+
+	pub fn special(self, format_name: &str, data: &[u8]) -> Result<(), Error> {
+		self.platform.special(format_name, data)
+	}
+
+	pub fn formats(self, data: &[ClipboardData]) -> Result<(), Error> {
+		self.platform.formats(data)
 	}
 }
 
@@ -475,5 +530,19 @@ mod tests {
 
 		assert_send_sync::<Clipboard>();
 		assert!(std::mem::needs_drop::<Clipboard>());
+	}
+
+	#[test]
+	fn get_set_special() {
+		env_logger::init();
+		let mut ctx = Clipboard::new().unwrap();
+
+		let special_format = "dyn.arboard.pecial.format";
+
+		ctx.set_special(special_format, &[1]).unwrap();
+		assert_eq!(ctx.get_special(special_format).unwrap(), vec![1]);
+
+		ctx.set_special(special_format, &[0]).unwrap();
+		assert_eq!(ctx.get_special(special_format).unwrap(), vec![0]);
 	}
 }

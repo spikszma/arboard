@@ -3,7 +3,7 @@ use std::{borrow::Cow, time::Instant};
 #[cfg(feature = "wayland-data-control")]
 use log::{trace, warn};
 
-use crate::{common::private, Error};
+use crate::{common::private, ClipboardData, ClipboardFormat, Error};
 #[cfg(feature = "image-data")]
 use crate::{ImageData, ImageRgba};
 
@@ -114,12 +114,44 @@ impl<'clipboard> Get<'clipboard> {
 		}
 	}
 
+	pub(crate) fn rtf(self) -> Result<String, Error> {
+		match self.clipboard {
+			Clipboard::X11(clipboard) => clipboard.get_rtf(self.selection),
+			#[cfg(feature = "wayland-data-control")]
+			Clipboard::WlDataControl(clipboard) => clipboard.get_rtf(self.selection),
+		}
+	}
+
+	pub(crate) fn html(self) -> Result<String, Error> {
+		match self.clipboard {
+			Clipboard::X11(clipboard) => clipboard.get_html(self.selection),
+			#[cfg(feature = "wayland-data-control")]
+			Clipboard::WlDataControl(clipboard) => clipboard.get_html(self.selection),
+		}
+	}
+
 	#[cfg(feature = "image-data")]
 	pub(crate) fn image(self) -> Result<ImageData<'static>, Error> {
 		match self.clipboard {
 			Clipboard::X11(clipboard) => clipboard.get_image(self.selection),
 			#[cfg(feature = "wayland-data-control")]
 			Clipboard::WlDataControl(clipboard) => clipboard.get_image(self.selection),
+		}
+	}
+
+	pub(crate) fn special(self, format_name: &str) -> Result<Vec<u8>, Error> {
+		match self.clipboard {
+			Clipboard::X11(clipboard) => clipboard.get_special(format_name, self.selection),
+			#[cfg(feature = "wayland-data-control")]
+			Clipboard::WlDataControl(clipboard) => clipboard.get_special(format_name, self.selection),
+		}
+	}
+
+	pub(crate) fn formats(self, formats: &[ClipboardFormat]) -> Result<Vec<ClipboardData>, Error> {
+		match self.clipboard {
+			Clipboard::X11(clipboard) => clipboard.get_formats(formats, self.selection),
+			#[cfg(feature = "wayland-data-control")]
+			Clipboard::WlDataControl(clipboard) => clipboard.get_formats(formats, self.selection),
 		}
 	}
 }
@@ -141,7 +173,7 @@ impl GetExtLinux for crate::Get<'_> {
 }
 
 /// Configuration on how long to wait for a new X11 copy event is emitted.
-#[derive(Default, Clone)]
+#[derive(Default, Copy, Clone)]
 pub(crate) enum WaitConfig {
 	/// Waits until the given [`Instant`] has reached.
 	Until(Instant),
@@ -174,6 +206,15 @@ impl<'clipboard> Set<'clipboard> {
 		}
 	}
 
+	pub(crate) fn rtf(self, rtf: Cow<'_, str>) -> Result<(), Error> {
+		match self.clipboard {
+			Clipboard::X11(clipboard) => clipboard.set_rtf(rtf, self.selection, self.wait),
+
+			#[cfg(feature = "wayland-data-control")]
+			Clipboard::WlDataControl(clipboard) => clipboard.set_rtf(rtf, self.selection, self.wait),
+		}
+	}
+
 	pub(crate) fn html(self, html: Cow<'_, str>, alt: Option<Cow<'_, str>>) -> Result<(), Error> {
 		match self.clipboard {
 			Clipboard::X11(clipboard) => clipboard.set_html(html, alt, self.selection, self.wait),
@@ -184,12 +225,34 @@ impl<'clipboard> Set<'clipboard> {
 	}
 
 	#[cfg(feature = "image-data")]
-	pub(crate) fn image(self, image: ImageData<'_>, _clear: bool) -> Result<(), Error> {
+	pub(crate) fn image(self, image: ImageData<'_>) -> Result<(), Error> {
 		match self.clipboard {
 			Clipboard::X11(clipboard) => clipboard.set_image(image, self.selection, self.wait),
 
 			#[cfg(feature = "wayland-data-control")]
 			Clipboard::WlDataControl(clipboard) => clipboard.set_image(image, self.selection, self.wait),
+		}
+	}
+
+	pub(crate) fn special(self, format_name: &str, data: &[u8]) -> Result<(), Error> {
+		match self.clipboard {
+			Clipboard::X11(clipboard) => {
+				clipboard.set_special(format_name, data, self.selection, self.wait)
+			}
+
+			#[cfg(feature = "wayland-data-control")]
+			Clipboard::WlDataControl(clipboard) => {
+				clipboard.set_special(format_name, data, self.selection, self.wait)
+			}
+		}
+	}
+
+	pub(crate) fn formats(self, data: &[ClipboardData]) -> Result<(), Error> {
+		match self.clipboard {
+			Clipboard::X11(clipboard) => clipboard.set_formats(data, self.selection, self.wait),
+
+			#[cfg(feature = "wayland-data-control")]
+			Clipboard::WlDataControl(clipboard) => clipboard.set_formats(data, self.selection, self.wait),
 		}
 	}
 }

@@ -9,8 +9,6 @@ and conditions of the chosen license apply to this file.
 */
 
 #[cfg(feature = "image-data")]
-use resvg::{tiny_skia, usvg};
-#[cfg(feature = "image-data")]
 use std::borrow::Cow;
 
 /// An error that might happen during a clipboard operation.
@@ -98,10 +96,37 @@ impl Error {
 	}
 }
 
+#[derive(Debug, Clone)]
+pub enum ClipboardFormat<'a> {
+	Text,
+	Html,
+	Rtf,
+	#[cfg(feature = "image-data")]
+	ImageRgba,
+	#[cfg(feature = "image-data")]
+	ImagePng,
+	#[cfg(feature = "image-data")]
+	ImageSvg,
+	Special(&'a str),
+}
+
+#[derive(Debug, Clone)]
+pub enum ClipboardData {
+	Unsupported,
+	Text(String),
+	Html(String),
+	Rtf(String),
+	#[cfg(feature = "image-data")]
+	Image(ImageData<'static>),
+	Special((String, Vec<u8>)),
+	None,
+}
+
 #[cfg(feature = "image-data")]
 #[derive(Debug, Clone)]
 pub enum ImageData<'a> {
 	Rgba(ImageRgba<'a>),
+	Png(Cow<'a, [u8]>),
 	Svg(String),
 }
 
@@ -146,6 +171,10 @@ impl<'a> ImageData<'a> {
 		ImageData::Rgba(ImageRgba { width, height, bytes })
 	}
 
+	pub fn png(bytes: Cow<'a, [u8]>) -> Self {
+		ImageData::Png(bytes)
+	}
+
 	pub fn svg<S: Into<String>>(svg: S) -> Self {
 		ImageData::Svg(svg.into())
 	}
@@ -155,6 +184,7 @@ impl<'a> ImageData<'a> {
 	pub fn into_owned_bytes(self) -> Cow<'static, [u8]> {
 		match self {
 			ImageData::Rgba(p) => p.into_owned_bytes(),
+			ImageData::Png(p) => Cow::Owned(p.into_owned()),
 			ImageData::Svg(s) => Cow::Owned(s.into_bytes()),
 		}
 	}
@@ -164,6 +194,7 @@ impl<'a> ImageData<'a> {
 	pub fn to_owned_img(&self) -> ImageData<'static> {
 		match self {
 			ImageData::Rgba(p) => ImageData::Rgba(p.to_owned_img()),
+			ImageData::Png(p) => ImageData::Png(p.clone().into_owned().into()),
 			ImageData::Svg(s) => ImageData::Svg(s.clone()),
 		}
 	}
@@ -172,6 +203,7 @@ impl<'a> ImageData<'a> {
 	pub fn bytes(&self) -> &[u8] {
 		match self {
 			ImageData::Rgba(p) => &p.bytes,
+			ImageData::Png(p) => p.as_ref(),
 			ImageData::Svg(s) => s.as_bytes(),
 		}
 	}
@@ -179,6 +211,7 @@ impl<'a> ImageData<'a> {
 	pub fn get_svg(&self) -> Option<&str> {
 		match self {
 			ImageData::Rgba(_) => None,
+			ImageData::Png(_) => None,
 			ImageData::Svg(s) => Some(s),
 		}
 	}
@@ -235,17 +268,4 @@ pub(crate) mod private {
 	impl Sealed for crate::Get<'_> {}
 	impl Sealed for crate::Set<'_> {}
 	impl Sealed for crate::Clear<'_> {}
-}
-
-#[cfg(feature = "image-data")]
-pub(crate) fn svg2pixmap<'s>(svg: &'s str) -> Result<tiny_skia::Pixmap, usvg::Error> {
-	let mut opt = usvg::Options::default();
-	opt.fontdb_mut().load_system_fonts();
-	let tree = usvg::Tree::from_data(svg.as_bytes(), &opt)?;
-	let pixmap_size = tree.size().to_int_size();
-	let Some(mut pixmap) = tiny_skia::Pixmap::new(pixmap_size.width(), pixmap_size.height()) else {
-		return Err(usvg::Error::InvalidSize);
-	};
-	resvg::render(&tree, tiny_skia::Transform::default(), &mut pixmap.as_mut());
-	Ok(pixmap)
 }

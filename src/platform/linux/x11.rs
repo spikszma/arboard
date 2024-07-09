@@ -23,7 +23,7 @@ use std::{
 	thread::JoinHandle,
 	thread_local,
 	time::{Duration, Instant},
-	usize,
+	usize, vec,
 };
 
 use log::{error, trace, warn};
@@ -46,7 +46,7 @@ use x11rb::{
 #[cfg(feature = "image-data")]
 use super::encode_as_png;
 use super::{into_unknown, LinuxClipboardKind, WaitConfig};
-use crate::{common::ScopeGuard, Error};
+use crate::{common::ScopeGuard, ClipboardData, ClipboardFormat, Error};
 #[cfg(feature = "image-data")]
 use crate::{ImageData, ImageRgba};
 
@@ -77,6 +77,7 @@ x11rb::atom_manager! {
 		TEXT,
 		TEXT_MIME_UNKNOWN: b"text/plain",
 
+		RTF: b"text/rtf",
 		HTML: b"text/html",
 
 		PNG_MIME: b"image/png",
@@ -180,7 +181,7 @@ impl XContext {
 
 #[derive(Default)]
 struct Selection {
-	data: RwLock<Option<Vec<ClipboardData>>>,
+	data: RwLock<Option<Vec<ClipboardDataX11>>>,
 	/// Mutex around nothing to use with the below condvar.
 	mutex: Mutex<()>,
 	/// A condvar that is notified when the contents of this clipboard are changed.
@@ -190,7 +191,7 @@ struct Selection {
 }
 
 #[derive(Debug, Clone)]
-struct ClipboardData {
+struct ClipboardDataX11 {
 	bytes: Vec<u8>,
 
 	/// The atom representing the format in which the data is encoded.
@@ -223,7 +224,7 @@ impl Inner {
 
 	fn write(
 		&self,
-		data: Vec<ClipboardData>,
+		data: Vec<ClipboardDataX11>,
 		selection: LinuxClipboardKind,
 		wait: WaitConfig,
 	) -> Result<()> {
@@ -277,7 +278,7 @@ impl Inner {
 	/// `formats` must be a slice of atoms, where each atom represents a target format.
 	/// The first format from `formats`, which the clipboard owner supports will be the
 	/// format of the return value.
-	fn read(&self, formats: &[Atom], selection: LinuxClipboardKind) -> Result<ClipboardData> {
+	fn read(&self, formats: &[Atom], selection: LinuxClipboardKind) -> Result<ClipboardDataX11> {
 		// if we are the current owner, we can get the current clipboard ourselves
 		if self.is_owner(selection)? {
 			let data = self.selection_of(selection).data.read();
@@ -301,7 +302,7 @@ impl Inner {
 		for format in formats {
 			match self.read_single(&reader, selection, *format) {
 				Ok(bytes) => {
-					return Ok(ClipboardData { bytes, format: *format });
+					return Ok(ClipboardDataX11 { bytes, format: *format });
 				}
 				Err(Error::ContentNotAvailable) => {
 					continue;
@@ -881,11 +882,41 @@ impl Clipboard {
 		selection: LinuxClipboardKind,
 		wait: WaitConfig,
 	) -> Result<()> {
-		let data = vec![ClipboardData {
-			bytes: message.into_owned().into_bytes(),
-			format: self.inner.atoms.UTF8_STRING,
-		}];
+		let data = vec![self.text_to_clip_data(message)];
 		self.inner.write(data, selection, wait)
+	}
+
+	fn text_to_clip_data(&self, text: Cow<'_, str>) -> ClipboardDataX11 {
+		ClipboardDataX11 {
+			bytes: text.into_owned().into_bytes(),
+			format: self.inner.atoms.UTF8_STRING,
+		}
+	}
+
+	pub(crate) fn get_rtf(&self, selection: LinuxClipboardKind) -> Result<String> {
+		let formats = [self.inner.atoms.RTF];
+		let result = self.inner.read(&formats, selection)?;
+		String::from_utf8(result.bytes).map_err(|_| Error::ConversionFailure)
+	}
+
+	pub(crate) fn set_rtf(
+		&self,
+		message: Cow<'_, str>,
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<()> {
+		let data = vec![self.rtf_to_clip_data(message)];
+		self.inner.write(data, selection, wait)
+	}
+
+	fn rtf_to_clip_data(&self, text: Cow<'_, str>) -> ClipboardDataX11 {
+		ClipboardDataX11 { bytes: text.into_owned().into_bytes(), format: self.inner.atoms.RTF }
+	}
+
+	pub(crate) fn get_html(&self, selection: LinuxClipboardKind) -> Result<String> {
+		let formats = [self.inner.atoms.HTML];
+		let result = self.inner.read(&formats, selection)?;
+		String::from_utf8(result.bytes).map_err(|_| Error::ConversionFailure)
 	}
 
 	pub(crate) fn set_html(
@@ -897,16 +928,14 @@ impl Clipboard {
 	) -> Result<()> {
 		let mut data = vec![];
 		if let Some(alt_text) = alt {
-			data.push(ClipboardData {
-				bytes: alt_text.into_owned().into_bytes(),
-				format: self.inner.atoms.UTF8_STRING,
-			});
+			data.push(self.text_to_clip_data(alt_text));
 		}
-		data.push(ClipboardData {
-			bytes: html.into_owned().into_bytes(),
-			format: self.inner.atoms.HTML,
-		});
+		data.push(self.html_to_clip_data(html));
 		self.inner.write(data, selection, wait)
+	}
+
+	fn html_to_clip_data(&self, html: Cow<'_, str>) -> ClipboardDataX11 {
+		ClipboardDataX11 { bytes: html.into_owned().into_bytes(), format: self.inner.atoms.HTML }
 	}
 
 	#[cfg(feature = "image-data")]
@@ -921,7 +950,7 @@ impl Clipboard {
 	}
 
 	#[cfg(feature = "image-data")]
-	pub(crate) fn get_image_png(
+	pub(crate) fn get_image_rgba(
 		&self,
 		selection: LinuxClipboardKind,
 	) -> Result<ImageData<'static>> {
@@ -938,6 +967,16 @@ impl Clipboard {
 		let (w, h) = image.dimensions();
 		let image_data = ImageData::rgba(w as _, h as _, image.into_raw().into());
 		Ok(image_data)
+	}
+
+	#[cfg(feature = "image-data")]
+	pub(crate) fn get_image_png(
+		&self,
+		selection: LinuxClipboardKind,
+	) -> Result<ImageData<'static>> {
+		let formats = [self.inner.atoms.PNG_MIME];
+		let bytes = self.inner.read(&formats, selection)?.bytes;
+		Ok(ImageData::png(bytes.into()))
 	}
 
 	#[cfg(feature = "image-data")]
@@ -959,21 +998,43 @@ impl Clipboard {
 		wait: WaitConfig,
 	) -> Result<()> {
 		match image {
-			ImageData::Rgba(data) => self.set_image_png(data, selection, wait),
+			ImageData::Rgba(data) => self.set_image_rgba(data, selection, wait),
+			ImageData::Png(png) => self.set_image_png(png.to_vec(), selection, wait),
 			ImageData::Svg(svg) => self.set_image_svg(svg, selection, wait),
 		}
 	}
 
 	#[cfg(feature = "image-data")]
-	pub(crate) fn set_image_png(
+	pub(crate) fn set_image_rgba(
 		&self,
 		image: ImageRgba,
 		selection: LinuxClipboardKind,
 		wait: WaitConfig,
 	) -> Result<()> {
-		let encoded = encode_as_png(&image)?;
-		let data = vec![ClipboardData { bytes: encoded, format: self.inner.atoms.PNG_MIME }];
+		let data = vec![self.rgba_to_clip_data(image)?];
 		self.inner.write(data, selection, wait)
+	}
+
+	#[cfg(feature = "image-data")]
+	fn rgba_to_clip_data(&self, image: ImageRgba) -> Result<ClipboardDataX11> {
+		let encoded = encode_as_png(&image)?;
+		Ok(ClipboardDataX11 { bytes: encoded, format: self.inner.atoms.PNG_MIME })
+	}
+
+	#[cfg(feature = "image-data")]
+	pub(crate) fn set_image_png(
+		&self,
+		png: Vec<u8>,
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<()> {
+		let data = vec![self.png_to_clip_data(png)];
+		self.inner.write(data, selection, wait)
+	}
+
+	#[cfg(feature = "image-data")]
+	fn png_to_clip_data(&self, png: Vec<u8>) -> ClipboardDataX11 {
+		ClipboardDataX11 { bytes: png, format: self.inner.atoms.PNG_MIME }
 	}
 
 	#[cfg(feature = "image-data")]
@@ -983,11 +1044,137 @@ impl Clipboard {
 		selection: LinuxClipboardKind,
 		wait: WaitConfig,
 	) -> Result<()> {
-		let data = vec![ClipboardData {
-			bytes: svg.clone().into_bytes(),
-			format: self.inner.atoms.SVG_MIME,
-		}];
+		let data = vec![self.svg_to_clip_data(svg)];
 		self.inner.write(data, selection, wait.clone())
+	}
+
+	fn svg_to_clip_data(&self, svg: String) -> ClipboardDataX11 {
+		ClipboardDataX11 { bytes: svg.into_bytes(), format: self.inner.atoms.SVG_MIME }
+	}
+
+	pub(crate) fn get_special(
+		&self,
+		format_name: &str,
+		selection: LinuxClipboardKind,
+	) -> Result<Vec<u8>, Error> {
+		let atom = self
+			.inner
+			.server
+			.conn
+			.intern_atom(false, format_name.as_bytes())
+			.map_err(into_unknown)?
+			.reply()
+			.map_err(into_unknown)?
+			.atom;
+		let formats = [atom];
+		self.inner.read(&formats, selection).map(|data| data.bytes)
+	}
+
+	pub(crate) fn set_special(
+		&self,
+		format_name: &str,
+		data: &[u8],
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<()> {
+		let data = vec![self.special_to_clip_data(format_name, data)?];
+		self.inner.write(data, selection, wait)
+	}
+
+	fn special_to_clip_data(&self, format_name: &str, data: &[u8]) -> Result<ClipboardDataX11> {
+		let atom = self
+			.inner
+			.server
+			.conn
+			.intern_atom(false, format_name.as_bytes())
+			.map_err(into_unknown)?
+			.reply()
+			.map_err(into_unknown)?
+			.atom;
+		Ok(ClipboardDataX11 { bytes: data.to_vec(), format: atom })
+	}
+
+	pub(crate) fn get_formats(
+		&self,
+		formats: &[ClipboardFormat],
+		selection: LinuxClipboardKind,
+	) -> Result<Vec<ClipboardData>, Error> {
+		let mut results = Vec::new();
+		for format in formats {
+			match format {
+				ClipboardFormat::Text => match self.get_text(selection) {
+					Ok(text) => results.push(ClipboardData::Text(text)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => return Err(e),
+				},
+				ClipboardFormat::Rtf => match self.get_rtf(selection) {
+					Ok(rtf) => results.push(ClipboardData::Rtf(rtf)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => return Err(e),
+				},
+				ClipboardFormat::Html => match self.get_html(selection) {
+					Ok(html) => results.push(ClipboardData::Html(html)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => return Err(e),
+				},
+				#[cfg(feature = "image-data")]
+				ClipboardFormat::ImageRgba => match self.get_image_rgba(selection) {
+					Ok(image) => results.push(ClipboardData::Image(image)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => return Err(e),
+				},
+				#[cfg(feature = "image-data")]
+				ClipboardFormat::ImagePng => match self.get_image_png(selection) {
+					Ok(image) => results.push(ClipboardData::Image(image)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => return Err(e),
+				},
+				#[cfg(feature = "image-data")]
+				ClipboardFormat::ImageSvg => match self.get_image_svg(selection) {
+					Ok(image) => results.push(ClipboardData::Image(image)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => return Err(e),
+				},
+				ClipboardFormat::Special(format_name) => {
+					match self.get_special(format_name, selection) {
+						Ok(data) => {
+							results.push(ClipboardData::Special((format_name.to_string(), data)))
+						}
+						Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+						Err(e) => return Err(e),
+					}
+				}
+			}
+		}
+		Ok(results)
+	}
+
+	pub(crate) fn set_formats(
+		&self,
+		data: &[ClipboardData],
+		selection: LinuxClipboardKind,
+		wait: WaitConfig,
+	) -> Result<(), Error> {
+		let mut vec_data_x11 = Vec::new();
+		for d in data {
+			match d {
+				ClipboardData::Text(text) => vec_data_x11.push(self.text_to_clip_data(text.into())),
+				ClipboardData::Rtf(rtf) => vec_data_x11.push(self.rtf_to_clip_data(rtf.into())),
+				ClipboardData::Html(html) => vec_data_x11.push(self.html_to_clip_data(html.into())),
+				ClipboardData::Image(image) => match image {
+					ImageData::Rgba(data) => {
+						vec_data_x11.push(self.rgba_to_clip_data(data.clone())?)
+					}
+					ImageData::Png(png) => vec_data_x11.push(self.png_to_clip_data(png.to_vec())),
+					ImageData::Svg(svg) => vec_data_x11.push(self.svg_to_clip_data(svg.clone())),
+				},
+				ClipboardData::Special((format_name, data)) => {
+					vec_data_x11.push(self.special_to_clip_data(format_name, data)?)
+				}
+				_ => {}
+			}
+		}
+		self.inner.write(vec_data_x11, selection, wait)
 	}
 }
 
