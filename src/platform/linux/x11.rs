@@ -956,17 +956,8 @@ impl Clipboard {
 	) -> Result<ImageData<'static>> {
 		let formats = [self.inner.atoms.PNG_MIME];
 		let bytes = self.inner.read(&formats, selection)?.bytes;
-
-		let cursor = std::io::Cursor::new(&bytes);
-		let mut reader = image::io::Reader::new(cursor);
-		reader.set_format(image::ImageFormat::Png);
-		let image = match reader.decode() {
-			Ok(img) => img.into_rgba8(),
-			Err(_e) => return Err(Error::ConversionFailure),
-		};
-		let (w, h) = image.dimensions();
-		let image_data = ImageData::rgba(w as _, h as _, image.into_raw().into());
-		Ok(image_data)
+		let image_data = super::decode_from_png(bytes)?;
+		Ok(ImageData::Rgba(image_data))
 	}
 
 	#[cfg(feature = "image-data")]

@@ -191,6 +191,31 @@ impl Clipboard {
 	}
 
 	#[cfg(feature = "image-data")]
+	pub(crate) fn get_image_rgba(
+		&mut self,
+		selection: LinuxClipboardKind,
+	) -> Result<ImageData<'static>, Error> {
+		use wl_clipboard_rs::paste::MimeType;
+
+		let result =
+			get_contents(selection.try_into()?, Seat::Unspecified, MimeType::Specific(MIME_PNG));
+		match result {
+			Ok((mut pipe, _mime_type)) => {
+				let mut buffer = vec![];
+				pipe.read_to_end(&mut buffer).map_err(into_unknown)?;
+				let image_data = super::decode_from_png(buffer)?;
+				Ok(ImageData::Rgba(image_data))
+			}
+
+			Err(PasteError::ClipboardEmpty) | Err(PasteError::NoMimeType) => {
+				Err(Error::ContentNotAvailable)
+			}
+
+			Err(err) => Err(Error::Unknown { description: err.to_string() }),
+		}
+	}
+
+	#[cfg(feature = "image-data")]
 	pub(crate) fn get_image_png(
 		&mut self,
 		selection: LinuxClipboardKind,
@@ -364,7 +389,13 @@ impl Clipboard {
 					Err(e) => return Err(e),
 				},
 				#[cfg(feature = "image-data")]
-				ClipboardFormat::ImageRgba => match self.get_image_png(selection) {
+				ClipboardFormat::ImageRgba => match self.get_image_rgba(selection) {
+					Ok(image) => results.push(ClipboardData::Image(image)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => return Err(e),
+				},
+				#[cfg(feature = "image-data")]
+				ClipboardFormat::ImagePng => match self.get_image_png(selection) {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => return Err(e),
@@ -384,7 +415,6 @@ impl Clipboard {
 						Err(e) => return Err(e),
 					}
 				}
-				_ => results.push(ClipboardData::Unsupported),
 			}
 		}
 		Ok(results)

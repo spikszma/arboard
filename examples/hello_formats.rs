@@ -46,6 +46,21 @@ fn main() {
 		),
 		#[cfg(feature = "image-data")]
 		(
+			ClipboardFormat::ImagePng,
+			ClipboardData::Image(arboard::ImageData::png(
+				[
+					137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0,
+					0, 2, 8, 6, 0, 0, 0, 114, 182, 13, 36, 0, 0, 0, 29, 73, 68, 65, 84, 120, 1, 1,
+					18, 0, 237, 255, 0, 255, 100, 100, 255, 100, 255, 100, 100, 0, 100, 100, 255,
+					100, 0, 0, 0, 255, 83, 20, 8, 28, 106, 36, 154, 137, 0, 0, 0, 0, 73, 69, 78,
+					68, 174, 66, 96, 130,
+				]
+				.as_ref()
+				.into(),
+			)),
+		),
+		#[cfg(feature = "image-data")]
+		(
 			ClipboardFormat::ImageSvg,
 			ClipboardData::Image(arboard::ImageData::svg(
 				r#"<?xml version="1.0" encoding="UTF-8" standalone="no"?>
