@@ -12,7 +12,7 @@ and conditions of the chosen license apply to this file.
 use crate::common::{ImageData, ImageRgba};
 use crate::{common::Error, ClipboardData, ClipboardFormat};
 use objc2::{
-	class, msg_send, msg_send_id,
+	msg_send_id,
 	rc::{autoreleasepool, Id},
 	runtime::ProtocolObject,
 	ClassType,
@@ -24,8 +24,8 @@ use objc2_app_kit::{
 use objc2_foundation::{NSArray, NSData, NSString};
 use std::{
 	borrow::Cow,
-	os::raw::c_void,
 	panic::{RefUnwindSafe, UnwindSafe},
+	ptr::NonNull,
 };
 
 const NS_PASTEBOARD_TYPE_SVG: &str = "public.svg-image";
@@ -525,9 +525,11 @@ impl<'clipboard> Set<'clipboard> {
 		}
 
 		let success = unsafe {
-			self.clipboard
-				.pasteboard
-				.setData_forType(Self::convert_slice_to_nsdata(data), NSPasteboardTypePNG)
+			let nsdata = NSData::dataWithBytesNoCopy_length(
+				NonNull::new_unchecked(data.as_ptr() as _),
+				data.len() as _,
+			);
+			self.clipboard.pasteboard.setData_forType(Some(&nsdata), NSPasteboardTypePNG)
 		};
 		if success {
 			Ok(())
@@ -559,23 +561,6 @@ impl<'clipboard> Set<'clipboard> {
 		}
 	}
 
-	fn convert_slice_to_nsdata(slice: &[u8]) -> Option<&NSData> {
-		unsafe {
-			let nsdata_class = class!(NSData);
-			let bytes: *const c_void = slice.as_ptr() as *const c_void;
-			let length = slice.len() as u64;
-
-			// Create NSData from bytes
-			let nsdata: *const objc2_foundation::NSData =
-				msg_send![nsdata_class, dataWithBytes:bytes as *const c_void length:length as u64];
-			if nsdata.is_null() {
-				None
-			} else {
-				Some(&*(nsdata as *const NSData))
-			}
-		}
-	}
-
 	pub(crate) fn special(mut self, format_name: &str, data: &[u8]) -> Result<(), Error> {
 		self.special_(format_name, data, true)
 	}
@@ -585,10 +570,13 @@ impl<'clipboard> Set<'clipboard> {
 			self.clipboard.clear();
 		}
 		let success = unsafe {
-			self.clipboard.pasteboard.setData_forType(
-				Self::convert_slice_to_nsdata(data),
-				&NSString::from_str(format_name),
-			)
+			let nsdata = NSData::dataWithBytesNoCopy_length(
+				NonNull::new_unchecked(data.as_ptr() as _),
+				data.len() as _,
+			);
+			self.clipboard
+				.pasteboard
+				.setData_forType(Some(&nsdata), &NSString::from_str(format_name))
 		};
 		if success {
 			Ok(())
