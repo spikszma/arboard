@@ -4,7 +4,6 @@ use std::{borrow::Cow, time::Instant};
 use log::{trace, warn};
 
 use crate::{common::private, ClipboardData, ClipboardFormat, Error};
-#[cfg(feature = "image-data")]
 use crate::{ImageData, ImageRgba};
 
 mod x11;
@@ -16,7 +15,6 @@ fn into_unknown<E: std::fmt::Display>(error: E) -> Error {
 	Error::Unknown { description: error.to_string() }
 }
 
-#[cfg(feature = "image-data")]
 fn encode_as_png(image: &ImageRgba) -> Result<Vec<u8>, Error> {
 	use image::ImageEncoder as _;
 
@@ -36,6 +34,17 @@ fn encode_as_png(image: &ImageRgba) -> Result<Vec<u8>, Error> {
 		.map_err(|_| Error::ConversionFailure)?;
 
 	Ok(png_bytes)
+}
+
+pub(crate) fn decode_from_png(bytes: Vec<u8>) -> Result<ImageRgba<'static>, Error> {
+	let img = match image::load_from_memory(&bytes) {
+		Ok(img) => img,
+		Err(_) => return Err(Error::ConversionFailure),
+	};
+	let rgba = img.to_rgba8();
+	let (width, height) = rgba.dimensions();
+	let bytes = rgba.into_raw();
+	Ok(ImageRgba { bytes: bytes.into(), width: width as _, height: height as _ })
 }
 
 /// Clipboard selection
@@ -130,7 +139,6 @@ impl<'clipboard> Get<'clipboard> {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn image(self) -> Result<ImageData<'static>, Error> {
 		match self.clipboard {
 			Clipboard::X11(clipboard) => clipboard.get_image(self.selection),
@@ -224,7 +232,6 @@ impl<'clipboard> Set<'clipboard> {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn image(self, image: ImageData<'_>) -> Result<(), Error> {
 		match self.clipboard {
 			Clipboard::X11(clipboard) => clipboard.set_image(image, self.selection, self.wait),
@@ -383,5 +390,26 @@ pub trait ClearExtLinux: private::Sealed {
 impl ClearExtLinux for crate::Clear<'_> {
 	fn clipboard(self, selection: LinuxClipboardKind) -> Result<(), Error> {
 		self.platform.clear_inner(selection)
+	}
+}
+
+mod tests {
+	#[test]
+	fn test_png_rgba_convertion() {
+		use super::{decode_from_png, encode_as_png};
+
+		let rgba_bytes =
+			[255u8, 100, 100, 255, 100, 255, 100, 100, 100, 100, 255, 100, 0, 0, 0, 255];
+		let w1 = 2;
+		let h1 = 2;
+
+		let img_rgba =
+			crate::ImageRgba { bytes: rgba_bytes.clone().to_vec().into(), width: w1, height: h1 };
+		let png_bytes = encode_as_png(&img_rgba).unwrap();
+		let img_rgba2 = decode_from_png(png_bytes).unwrap();
+
+		assert_eq!(rgba_bytes.to_vec(), img_rgba2.bytes.to_vec());
+		assert_eq!(w1, img_rgba2.width);
+		assert_eq!(h1, img_rgba2.height);
 	}
 }

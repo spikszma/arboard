@@ -43,11 +43,9 @@ use x11rb::{
 	COPY_DEPTH_FROM_PARENT, COPY_FROM_PARENT, NONE,
 };
 
-#[cfg(feature = "image-data")]
 use super::encode_as_png;
 use super::{into_unknown, LinuxClipboardKind, WaitConfig};
 use crate::{common::ScopeGuard, ClipboardData, ClipboardFormat, Error};
-#[cfg(feature = "image-data")]
 use crate::{ImageData, ImageRgba};
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -938,7 +936,6 @@ impl Clipboard {
 		ClipboardDataX11 { bytes: html.into_owned().into_bytes(), format: self.inner.atoms.HTML }
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn get_image(&self, selection: LinuxClipboardKind) -> Result<ImageData<'static>> {
 		let formats = [self.inner.atoms.SVG_MIME, self.inner.atoms.PNG_MIME];
 		let result = self.inner.read(&formats, selection)?;
@@ -949,27 +946,16 @@ impl Clipboard {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn get_image_rgba(
 		&self,
 		selection: LinuxClipboardKind,
 	) -> Result<ImageData<'static>> {
 		let formats = [self.inner.atoms.PNG_MIME];
 		let bytes = self.inner.read(&formats, selection)?.bytes;
-
-		let cursor = std::io::Cursor::new(&bytes);
-		let mut reader = image::io::Reader::new(cursor);
-		reader.set_format(image::ImageFormat::Png);
-		let image = match reader.decode() {
-			Ok(img) => img.into_rgba8(),
-			Err(_e) => return Err(Error::ConversionFailure),
-		};
-		let (w, h) = image.dimensions();
-		let image_data = ImageData::rgba(w as _, h as _, image.into_raw().into());
-		Ok(image_data)
+		let image_data = super::decode_from_png(bytes)?;
+		Ok(ImageData::Rgba(image_data))
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn get_image_png(
 		&self,
 		selection: LinuxClipboardKind,
@@ -979,7 +965,6 @@ impl Clipboard {
 		Ok(ImageData::png(bytes.into()))
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn get_image_svg(
 		&self,
 		selection: LinuxClipboardKind,
@@ -990,7 +975,6 @@ impl Clipboard {
 		Ok(ImageData::svg(svg))
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn set_image(
 		&self,
 		image: ImageData,
@@ -1004,7 +988,6 @@ impl Clipboard {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn set_image_rgba(
 		&self,
 		image: ImageRgba,
@@ -1015,13 +998,11 @@ impl Clipboard {
 		self.inner.write(data, selection, wait)
 	}
 
-	#[cfg(feature = "image-data")]
 	fn rgba_to_clip_data(&self, image: ImageRgba) -> Result<ClipboardDataX11> {
 		let encoded = encode_as_png(&image)?;
 		Ok(ClipboardDataX11 { bytes: encoded, format: self.inner.atoms.PNG_MIME })
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn set_image_png(
 		&self,
 		png: Vec<u8>,
@@ -1032,12 +1013,10 @@ impl Clipboard {
 		self.inner.write(data, selection, wait)
 	}
 
-	#[cfg(feature = "image-data")]
 	fn png_to_clip_data(&self, png: Vec<u8>) -> ClipboardDataX11 {
 		ClipboardDataX11 { bytes: png, format: self.inner.atoms.PNG_MIME }
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn set_image_svg(
 		&self,
 		svg: String,
@@ -1117,19 +1096,16 @@ impl Clipboard {
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => return Err(e),
 				},
-				#[cfg(feature = "image-data")]
 				ClipboardFormat::ImageRgba => match self.get_image_rgba(selection) {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => return Err(e),
 				},
-				#[cfg(feature = "image-data")]
 				ClipboardFormat::ImagePng => match self.get_image_png(selection) {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => return Err(e),
 				},
-				#[cfg(feature = "image-data")]
 				ClipboardFormat::ImageSvg => match self.get_image_svg(selection) {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),

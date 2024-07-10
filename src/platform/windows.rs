@@ -11,7 +11,6 @@ and conditions of the chosen license apply to this file.
 use clipboard_win::{formats::Html, options, Getter};
 use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
 
-#[cfg(feature = "image-data")]
 use crate::common::{ImageData, ImageRgba};
 use crate::{
 	common::{private, Error},
@@ -23,7 +22,6 @@ const CFSTR_MIME_RICHTEXT: &str = "text/richtext";
 const CFSTR_MIME_PNG: &str = "image/png";
 const CFSTR_MIME_SVG_XML: &str = "image/svg+xml";
 
-#[cfg(feature = "image-data")]
 mod image_data {
 	use super::*;
 	use crate::common::ScopeGuard;
@@ -619,7 +617,6 @@ impl<'clipboard> Get<'clipboard> {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn image(self) -> Result<ImageData<'static>, Error> {
 		let _clipboard_assertion = self.clipboard?;
 		Self::image_()
@@ -635,7 +632,6 @@ impl<'clipboard> Get<'clipboard> {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	fn image_dibv5() -> Result<ImageData<'static>, Error> {
 		const FORMAT: u32 = clipboard_win::formats::CF_DIBV5;
 
@@ -651,7 +647,6 @@ impl<'clipboard> Get<'clipboard> {
 		image_data::read_cf_dibv5(&data)
 	}
 
-	#[cfg(feature = "image-data")]
 	fn image_png() -> Result<ImageData<'static>, Error> {
 		let format = register_format_(CFSTR_MIME_PNG)?;
 		if !clipboard_win::is_format_avail(format) {
@@ -664,7 +659,6 @@ impl<'clipboard> Get<'clipboard> {
 		Ok(ImageData::png(data.into()))
 	}
 
-	#[cfg(feature = "image-data")]
 	fn image_svg() -> Result<ImageData<'static>, Error> {
 		let format = register_format_(CFSTR_MIME_SVG_XML)?;
 		if !clipboard_win::is_format_avail(format) {
@@ -715,19 +709,16 @@ impl<'clipboard> Get<'clipboard> {
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => return Err(e),
 				},
-				#[cfg(feature = "image-data")]
 				ClipboardFormat::ImageRgba => match Self::image_dibv5() {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => return Err(e),
 				},
-				#[cfg(feature = "image-data")]
 				ClipboardFormat::ImagePng => match Self::image_png() {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => return Err(e),
 				},
-				#[cfg(feature = "image-data")]
 				ClipboardFormat::ImageSvg => match Self::image_svg() {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
@@ -846,7 +837,6 @@ impl<'clipboard> Set<'clipboard> {
 			.map_err(|e| Error::unknown(e.to_string()))
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn image(self, image: ImageData) -> Result<(), Error> {
 		let _open_clipboard = self.clipboard?;
 		if let Err(e) = clipboard_win::raw::empty() {
@@ -866,7 +856,6 @@ impl<'clipboard> Set<'clipboard> {
 	}
 
 	#[inline]
-	#[cfg(feature = "image-data")]
 	fn image_rgba(image: ImageRgba) -> Result<(), Error> {
 		// XXX: The ordering of these functions is important, as some programs will grab the
 		// first format available. PNGs tend to have better compatibility on Windows, so it is set first.
@@ -875,7 +864,6 @@ impl<'clipboard> Set<'clipboard> {
 	}
 
 	#[inline]
-	#[cfg(feature = "image-data")]
 	fn image_svg(svg: String) -> Result<(), Error> {
 		let format = register_format_(CFSTR_MIME_SVG_XML)?;
 		clipboard_win::raw::set_without_clear(format, svg.as_bytes())
@@ -925,7 +913,6 @@ impl<'clipboard> Set<'clipboard> {
 				ClipboardData::Html(html) => {
 					Self::html_without_alt_(html.clone().into())?;
 				}
-				#[cfg(feature = "image-data")]
 				ClipboardData::Image(image) => {
 					Self::image_(image.clone())?;
 				}

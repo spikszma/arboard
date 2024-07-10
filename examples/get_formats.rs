@@ -11,11 +11,8 @@ fn main() {
 		ClipboardFormat::Text,
 		ClipboardFormat::Html,
 		ClipboardFormat::Rtf,
-		#[cfg(feature = "image-data")]
 		ClipboardFormat::ImageRgba,
-		#[cfg(feature = "image-data")]
 		ClipboardFormat::ImagePng,
-		#[cfg(feature = "image-data")]
 		ClipboardFormat::ImageSvg,
 		ClipboardFormat::Special(FORMAT_SPECIAL),
 	];

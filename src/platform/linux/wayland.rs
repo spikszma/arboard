@@ -7,16 +7,12 @@ use wl_clipboard_rs::{
 	utils::is_primary_selection_supported,
 };
 
-#[cfg(feature = "image-data")]
 use super::encode_as_png;
 use super::{into_unknown, LinuxClipboardKind, WaitConfig};
 use crate::common::{ClipboardData, ClipboardFormat, Error};
-#[cfg(feature = "image-data")]
 use crate::common::{ImageData, ImageRgba};
 
-#[cfg(feature = "image-data")]
 const MIME_PNG: &str = "image/png";
-#[cfg(feature = "image-data")]
 const MIME_SVG: &str = "image/svg+xml";
 const MIME_HTML: &'static str = "text/html";
 const MIME_RTF: &'static str = "text/rtf";
@@ -179,7 +175,6 @@ impl Clipboard {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn get_image(
 		&mut self,
 		selection: LinuxClipboardKind,
@@ -190,7 +185,30 @@ impl Clipboard {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
+	pub(crate) fn get_image_rgba(
+		&mut self,
+		selection: LinuxClipboardKind,
+	) -> Result<ImageData<'static>, Error> {
+		use wl_clipboard_rs::paste::MimeType;
+
+		let result =
+			get_contents(selection.try_into()?, Seat::Unspecified, MimeType::Specific(MIME_PNG));
+		match result {
+			Ok((mut pipe, _mime_type)) => {
+				let mut buffer = vec![];
+				pipe.read_to_end(&mut buffer).map_err(into_unknown)?;
+				let image_data = super::decode_from_png(buffer)?;
+				Ok(ImageData::Rgba(image_data))
+			}
+
+			Err(PasteError::ClipboardEmpty) | Err(PasteError::NoMimeType) => {
+				Err(Error::ContentNotAvailable)
+			}
+
+			Err(err) => Err(Error::Unknown { description: err.to_string() }),
+		}
+	}
+
 	pub(crate) fn get_image_png(
 		&mut self,
 		selection: LinuxClipboardKind,
@@ -214,7 +232,6 @@ impl Clipboard {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn get_image_svg(
 		&mut self,
 		selection: LinuxClipboardKind,
@@ -238,7 +255,6 @@ impl Clipboard {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn set_image(
 		&mut self,
 		image: ImageData,
@@ -252,7 +268,6 @@ impl Clipboard {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn set_image_rgba(
 		&mut self,
 		image: ImageRgba,
@@ -263,7 +278,6 @@ impl Clipboard {
 		self.set_source(Self::png_to_mime_source(image), selection, wait)
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn set_image_png(
 		&mut self,
 		png: Vec<u8>,
@@ -273,7 +287,6 @@ impl Clipboard {
 		self.set_source(Self::png_to_mime_source(png), selection, wait)
 	}
 
-	#[cfg(feature = "image-data")]
 	fn png_to_mime_source(png: Vec<u8>) -> MimeSource {
 		MimeSource {
 			source: Source::Bytes(png.into_boxed_slice()),
@@ -281,7 +294,6 @@ impl Clipboard {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn set_image_svg(
 		&mut self,
 		svg: String,
@@ -291,7 +303,6 @@ impl Clipboard {
 		self.set_source(Self::svg_to_mime_source(svg), selection, wait)
 	}
 
-	#[cfg(feature = "image-data")]
 	fn svg_to_mime_source(svg: String) -> MimeSource {
 		MimeSource {
 			source: Source::Bytes(svg.into_bytes().into_boxed_slice()),
@@ -363,13 +374,16 @@ impl Clipboard {
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => return Err(e),
 				},
-				#[cfg(feature = "image-data")]
-				ClipboardFormat::ImageRgba => match self.get_image_png(selection) {
+				ClipboardFormat::ImageRgba => match self.get_image_rgba(selection) {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => return Err(e),
 				},
-				#[cfg(feature = "image-data")]
+				ClipboardFormat::ImagePng => match self.get_image_png(selection) {
+					Ok(image) => results.push(ClipboardData::Image(image)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => return Err(e),
+				},
 				ClipboardFormat::ImageSvg => match self.get_image_svg(selection) {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
@@ -384,7 +398,6 @@ impl Clipboard {
 						Err(e) => return Err(e),
 					}
 				}
-				_ => results.push(ClipboardData::Unsupported),
 			}
 		}
 		Ok(results)
@@ -408,7 +421,6 @@ impl Clipboard {
 				ClipboardData::Html(html) => {
 					sources.push(Self::html_to_mime_source(Cow::Borrowed(html)));
 				}
-				#[cfg(feature = "image-data")]
 				ClipboardData::Image(image) => match image {
 					ImageData::Rgba(image) => {
 						sources.push(Self::png_to_mime_source(encode_as_png(image)?));
