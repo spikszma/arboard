@@ -33,7 +33,6 @@ fn main() {
 		(ClipboardFormat::Text, ClipboardData::Text("Hello, world!".to_string())),
 		(ClipboardFormat::Html, ClipboardData::Html("<b>Hello, world!</b>".to_string())),
 		(ClipboardFormat::Rtf, ClipboardData::Rtf("{\\rtf1\\ansi\\b Hello, world!}".to_string())),
-		#[cfg(feature = "image-data")]
 		(
 			ClipboardFormat::ImageRgba,
 			ClipboardData::Image(arboard::ImageData::rgba(
@@ -44,7 +43,6 @@ fn main() {
 					.into(),
 			)),
 		),
-		#[cfg(feature = "image-data")]
 		(
 			ClipboardFormat::ImagePng,
 			ClipboardData::Image(arboard::ImageData::png(
@@ -59,7 +57,6 @@ fn main() {
 				.into(),
 			)),
 		),
-		#[cfg(feature = "image-data")]
 		(
 			ClipboardFormat::ImageSvg,
 			ClipboardData::Image(arboard::ImageData::svg(

@@ -8,7 +8,6 @@ the Apache 2.0 or the MIT license at the licensee's choice. The terms
 and conditions of the chosen license apply to this file.
 */
 
-#[cfg(feature = "image-data")]
 use std::borrow::Cow;
 
 /// An error that might happen during a clipboard operation.
@@ -101,11 +100,8 @@ pub enum ClipboardFormat<'a> {
 	Text,
 	Html,
 	Rtf,
-	#[cfg(feature = "image-data")]
 	ImageRgba,
-	#[cfg(feature = "image-data")]
 	ImagePng,
-	#[cfg(feature = "image-data")]
 	ImageSvg,
 	Special(&'a str),
 }
@@ -116,13 +112,11 @@ pub enum ClipboardData {
 	Text(String),
 	Html(String),
 	Rtf(String),
-	#[cfg(feature = "image-data")]
 	Image(ImageData<'static>),
 	Special((String, Vec<u8>)),
 	None,
 }
 
-#[cfg(feature = "image-data")]
 #[derive(Debug, Clone)]
 pub enum ImageData<'a> {
 	Rgba(ImageRgba<'a>),
@@ -157,7 +151,6 @@ pub enum ImageData<'a> {
 ///     bytes: Cow::from(bytes.as_ref())
 /// };
 /// ```
-#[cfg(feature = "image-data")]
 #[derive(Debug, Clone)]
 pub struct ImageRgba<'a> {
 	pub width: usize,
@@ -165,7 +158,6 @@ pub struct ImageRgba<'a> {
 	pub bytes: Cow<'a, [u8]>,
 }
 
-#[cfg(feature = "image-data")]
 impl<'a> ImageData<'a> {
 	pub fn rgba(width: usize, height: usize, bytes: Cow<'a, [u8]>) -> Self {
 		ImageData::Rgba(ImageRgba { width, height, bytes })
@@ -217,7 +209,6 @@ impl<'a> ImageData<'a> {
 	}
 }
 
-#[cfg(feature = "image-data")]
 impl<'a> ImageRgba<'a> {
 	/// Returns a the bytes field in a way that it's guaranteed to be owned.
 	/// It moves the bytes if they are already owned and clones them if they are borrowed.
@@ -243,7 +234,7 @@ pub(crate) struct ScopeGuard<F: FnOnce()> {
 
 #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
 impl<F: FnOnce()> ScopeGuard<F> {
-	#[cfg_attr(all(windows, not(feature = "image-data")), allow(dead_code))]
+	#[cfg_attr(windows, allow(dead_code))]
 	pub(crate) fn new(callback: F) -> Self {
 		ScopeGuard { callback: Some(callback) }
 	}

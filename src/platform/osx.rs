@@ -8,7 +8,6 @@ the Apache 2.0 or the MIT license at the licensee's choice. The terms
 and conditions of the chosen license apply to this file.
 */
 
-#[cfg(feature = "image-data")]
 use crate::common::{ImageData, ImageRgba};
 use crate::{common::Error, ClipboardData, ClipboardFormat};
 use objc2::{
@@ -31,7 +30,6 @@ use std::{
 const NS_PASTEBOARD_TYPE_SVG: &str = "public.svg-image";
 
 /// Returns an NSImage object on success.
-#[cfg(feature = "image-data")]
 fn image_from_pixels(
 	pixels: Vec<u8>,
 	width: usize,
@@ -226,7 +224,6 @@ impl<'clipboard> Get<'clipboard> {
 		})
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn image(self) -> Result<ImageData<'static>, Error> {
 		match self.image_svg() {
 			Err(Error::ContentNotAvailable) => match self.image_png() {
@@ -238,7 +235,6 @@ impl<'clipboard> Get<'clipboard> {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	fn image_tiff(&self) -> Result<ImageData<'static>, Error> {
 		use objc2_app_kit::NSPasteboardTypeTIFF;
 		use std::io::Cursor;
@@ -261,7 +257,6 @@ impl<'clipboard> Get<'clipboard> {
 		Ok(ImageData::rgba(width as _, height as _, rgba.into_raw().into()))
 	}
 
-	#[cfg(feature = "image-data")]
 	fn image_png(&self) -> Result<ImageData<'static>, Error> {
 		use objc2_app_kit::NSPasteboardTypePNG;
 		autoreleasepool(|_| {
@@ -271,7 +266,6 @@ impl<'clipboard> Get<'clipboard> {
 		})
 	}
 
-	#[cfg(feature = "image-data")]
 	fn image_svg(&self) -> Result<ImageData<'static>, Error> {
 		autoreleasepool(|_| {
 			let image_data = unsafe {
@@ -338,7 +332,6 @@ impl<'clipboard> Get<'clipboard> {
 								break;
 							}
 						}
-						#[cfg(feature = "image-data")]
 						ClipboardFormat::ImageRgba => match self.image_tiff() {
 							Ok(image) => {
 								results.push(ClipboardData::Image(image));
@@ -347,7 +340,6 @@ impl<'clipboard> Get<'clipboard> {
 							Err(Error::ContentNotAvailable) => {}
 							Err(e) => return Err(e),
 						},
-						#[cfg(feature = "image-data")]
 						ClipboardFormat::ImagePng => match self.image_png() {
 							Ok(image) => {
 								results.push(ClipboardData::Image(image));
@@ -356,7 +348,6 @@ impl<'clipboard> Get<'clipboard> {
 							Err(Error::ContentNotAvailable) => {}
 							Err(e) => return Err(e),
 						},
-						#[cfg(feature = "image-data")]
 						ClipboardFormat::ImageSvg => match self.image_svg() {
 							Ok(image) => {
 								results.push(ClipboardData::Image(image));
@@ -480,7 +471,6 @@ impl<'clipboard> Set<'clipboard> {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn image(mut self, data: ImageData) -> Result<(), Error> {
 		self.image_(data, true)
 	}
@@ -493,7 +483,6 @@ impl<'clipboard> Set<'clipboard> {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn image_pixels(&mut self, data: ImageRgba, clear: bool) -> Result<(), Error> {
 		if clear {
 			self.clipboard.clear();
@@ -516,7 +505,6 @@ impl<'clipboard> Set<'clipboard> {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn image_png(&mut self, data: &[u8], clear: bool) -> Result<(), Error> {
 		use objc2_app_kit::NSPasteboardTypePNG;
 
@@ -540,7 +528,6 @@ impl<'clipboard> Set<'clipboard> {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn image_svg(&mut self, data: String, clear: bool) -> Result<(), Error> {
 		if clear {
 			self.clipboard.clear();
@@ -592,7 +579,6 @@ impl<'clipboard> Set<'clipboard> {
 				ClipboardData::Text(data) => self.text_(Cow::Borrowed(data), false)?,
 				ClipboardData::Rtf(data) => self.rtf_(Cow::Borrowed(data), false)?,
 				ClipboardData::Html(data) => self.html_(Cow::Borrowed(data), None, false)?,
-				#[cfg(feature = "image-data")]
 				ClipboardData::Image(data) => self.image_(data.clone(), false)?,
 				ClipboardData::Special((format_name, data)) => {
 					self.special_(format_name, data, false)?

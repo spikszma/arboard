@@ -4,7 +4,6 @@ use std::{borrow::Cow, time::Instant};
 use log::{trace, warn};
 
 use crate::{common::private, ClipboardData, ClipboardFormat, Error};
-#[cfg(feature = "image-data")]
 use crate::{ImageData, ImageRgba};
 
 mod x11;
@@ -16,7 +15,6 @@ fn into_unknown<E: std::fmt::Display>(error: E) -> Error {
 	Error::Unknown { description: error.to_string() }
 }
 
-#[cfg(feature = "image-data")]
 fn encode_as_png(image: &ImageRgba) -> Result<Vec<u8>, Error> {
 	use image::ImageEncoder as _;
 
@@ -38,7 +36,6 @@ fn encode_as_png(image: &ImageRgba) -> Result<Vec<u8>, Error> {
 	Ok(png_bytes)
 }
 
-#[cfg(feature = "image-data")]
 pub(crate) fn decode_from_png(bytes: Vec<u8>) -> Result<ImageRgba<'static>, Error> {
 	let img = match image::load_from_memory(&bytes) {
 		Ok(img) => img,
@@ -142,7 +139,6 @@ impl<'clipboard> Get<'clipboard> {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn image(self) -> Result<ImageData<'static>, Error> {
 		match self.clipboard {
 			Clipboard::X11(clipboard) => clipboard.get_image(self.selection),
@@ -236,7 +232,6 @@ impl<'clipboard> Set<'clipboard> {
 		}
 	}
 
-	#[cfg(feature = "image-data")]
 	pub(crate) fn image(self, image: ImageData<'_>) -> Result<(), Error> {
 		match self.clipboard {
 			Clipboard::X11(clipboard) => clipboard.set_image(image, self.selection, self.wait),
