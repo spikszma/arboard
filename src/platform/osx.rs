@@ -11,7 +11,7 @@ and conditions of the chosen license apply to this file.
 use crate::common::{ImageData, ImageRgba};
 use crate::{common::Error, ClipboardData, ClipboardFormat};
 use objc2::{
-	msg_send_id,
+	class, msg_send, msg_send_id,
 	rc::{autoreleasepool, Id},
 	runtime::ProtocolObject,
 	ClassType,
@@ -21,10 +21,10 @@ use objc2_app_kit::{
 	NSPasteboardTypeString,
 };
 use objc2_foundation::{NSArray, NSData, NSString};
+use std::os::raw::c_void;
 use std::{
 	borrow::Cow,
 	panic::{RefUnwindSafe, UnwindSafe},
-	ptr::NonNull,
 };
 
 const NS_PASTEBOARD_TYPE_SVG: &str = "public.svg-image";
@@ -512,20 +512,28 @@ impl<'clipboard> Set<'clipboard> {
 			self.clipboard.clear();
 		}
 
-		let success = unsafe {
-			let nsdata = NSData::dataWithBytesNoCopy_length(
-				NonNull::new_unchecked(data.as_ptr() as _),
-				data.len() as _,
-			);
-			self.clipboard.pasteboard.setData_forType(Some(&nsdata), NSPasteboardTypePNG)
-		};
-		if success {
-			Ok(())
-		} else {
-			Err(Error::Unknown {
-				description: "Failed to write the PNG image to the pasteboard.".into(),
-			})
-		}
+		autoreleasepool(|_| {
+			let success = unsafe {
+				let nsdata: *const objc2_foundation::NSData = msg_send![class!(NSData), dataWithBytes:data.as_ptr() as *const c_void length:data.len() as u64];
+				if nsdata.is_null() {
+					return Err(Error::Unknown {
+						description: "Failed to create NSData from bytes".into(),
+					});
+				}
+
+				self.clipboard
+					.pasteboard
+					.setData_forType(Some(&*(nsdata as *const NSData)), NSPasteboardTypePNG)
+			};
+
+			if success {
+				Ok(())
+			} else {
+				Err(Error::Unknown {
+					description: "Failed to write the PNG image to the pasteboard.".into(),
+				})
+			}
+		})
 	}
 
 	pub(crate) fn image_svg(&mut self, data: String, clear: bool) -> Result<(), Error> {
@@ -556,20 +564,28 @@ impl<'clipboard> Set<'clipboard> {
 		if clear {
 			self.clipboard.clear();
 		}
-		let success = unsafe {
-			let nsdata = NSData::dataWithBytesNoCopy_length(
-				NonNull::new_unchecked(data.as_ptr() as _),
-				data.len() as _,
-			);
-			self.clipboard
-				.pasteboard
-				.setData_forType(Some(&nsdata), &NSString::from_str(format_name))
-		};
-		if success {
-			Ok(())
-		} else {
-			Err(Error::Unknown { description: "NSPasteboard#writeObjects: returned false".into() })
-		}
+		autoreleasepool(|_| {
+			let success = unsafe {
+				let nsdata: *const objc2_foundation::NSData = msg_send![class!(NSData), dataWithBytes:data.as_ptr() as *const c_void length:data.len() as u64];
+				if nsdata.is_null() {
+					return Err(Error::Unknown {
+						description: "Failed to create NSData from bytes".into(),
+					});
+				}
+
+				self.clipboard.pasteboard.setData_forType(
+					Some(&*(nsdata as *const NSData)),
+					&NSString::from_str(format_name),
+				)
+			};
+			if success {
+				Ok(())
+			} else {
+				Err(Error::Unknown {
+					description: "NSPasteboard#writeObjects: returned false".into(),
+				})
+			}
+		})
 	}
 
 	pub(crate) fn formats(mut self, data: &[ClipboardData]) -> Result<(), Error> {
