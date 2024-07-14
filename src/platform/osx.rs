@@ -588,6 +588,19 @@ impl<'clipboard> Set<'clipboard> {
 		})
 	}
 
+	// It may be better to use `writeObjects` to set multiple formats at once.
+	// ```rust
+	// 		let mut write_objects = vec![];
+	// 		unsafe {
+	// 			let item = objc2_app_kit::NSPasteboardItem::new();
+	// 			item.setString_forType(&NSString::from_str("string"), NSPasteboardTypeString);
+	// 			write_objects.push(item);
+	// 		}
+	//		self.clipboard.pasteboard.writeObjects(&NSArray::from_vec(write_objects));
+	// ```
+	// But it's not clear how to set image data in `image_pixels()`.
+	//
+	// Current implementation is working fine.
 	pub(crate) fn formats(mut self, data: &[ClipboardData]) -> Result<(), Error> {
 		self.clipboard.clear();
 		for d in data {
