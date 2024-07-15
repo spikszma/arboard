@@ -17,8 +17,8 @@ use objc2::{
 	ClassType,
 };
 use objc2_app_kit::{
-	NSPasteboard, NSPasteboardType, NSPasteboardTypeHTML, NSPasteboardTypeRTF,
-	NSPasteboardTypeString,
+	NSPasteboard, NSPasteboardType, NSPasteboardTypeHTML, NSPasteboardTypePNG, NSPasteboardTypeRTF,
+	NSPasteboardTypeString, NSPasteboardWriting,
 };
 use objc2_foundation::{NSArray, NSData, NSString};
 use std::os::raw::c_void;
@@ -258,7 +258,6 @@ impl<'clipboard> Get<'clipboard> {
 	}
 
 	fn image_png(&self) -> Result<ImageData<'static>, Error> {
-		use objc2_app_kit::NSPasteboardTypePNG;
 		autoreleasepool(|_| {
 			let image_data = unsafe { self.clipboard.pasteboard.dataForType(NSPasteboardTypePNG) }
 				.ok_or(Error::ContentNotAvailable)?;
@@ -421,7 +420,9 @@ impl<'clipboard> Set<'clipboard> {
 		if success {
 			Ok(())
 		} else {
-			Err(Error::Unknown { description: "NSPasteboard#writeObjects: returned false".into() })
+			Err(Error::Unknown {
+				description: "NSPasteboard#setString_forType: returned false".into(),
+			})
 		}
 	}
 
@@ -433,6 +434,23 @@ impl<'clipboard> Set<'clipboard> {
 		self.html_(html, alt, true)
 	}
 
+	fn try_wrap_html(html: Cow<'_, str>) -> Id<NSString> {
+		// Text goes to the clipboard as UTF-8 but may be interpreted as Windows Latin 1.
+		// This wrapping forces it to be interpreted as UTF-8.
+		//
+		// See:
+		// https://bugzilla.mozilla.org/show_bug.cgi?id=466599
+		// https://bugs.chromium.org/p/chromium/issues/detail?id=11957
+		let wrap_prefix = r#"<html><head><meta http-equiv="content-type" content="text/html; charset=utf-8"></head><body>"#;
+		let wrap_suffix = "</body></html>";
+		if html.starts_with(wrap_prefix) {
+			NSString::from_str(&html)
+		} else {
+			let html = format!("{wrap_prefix}{html}{wrap_suffix}",);
+			NSString::from_str(&html)
+		}
+	}
+
 	fn html_(
 		&mut self,
 		html: Cow<'_, str>,
@@ -442,16 +460,7 @@ impl<'clipboard> Set<'clipboard> {
 		if clear {
 			self.clipboard.clear();
 		}
-		// Text goes to the clipboard as UTF-8 but may be interpreted as Windows Latin 1.
-		// This wrapping forces it to be interpreted as UTF-8.
-		//
-		// See:
-		// https://bugzilla.mozilla.org/show_bug.cgi?id=466599
-		// https://bugs.chromium.org/p/chromium/issues/detail?id=11957
-		let html = format!(
-			r#"<html><head><meta http-equiv="content-type" content="text/html; charset=utf-8"></head><body>{html}</body></html>"#,
-		);
-		let html_nss = NSString::from_str(&html);
+		let html_nss = Self::try_wrap_html(html);
 		// Make sure that we pass a pointer to the string and not the object itself.
 		let mut success =
 			unsafe { self.clipboard.pasteboard.setString_forType(&html_nss, NSPasteboardTypeHTML) };
@@ -467,7 +476,9 @@ impl<'clipboard> Set<'clipboard> {
 		if success {
 			Ok(())
 		} else {
-			Err(Error::Unknown { description: "NSPasteboard#writeObjects: returned false".into() })
+			Err(Error::Unknown {
+				description: "NSPasteboard#setString_forType: returned false".into(),
+			})
 		}
 	}
 
@@ -506,8 +517,6 @@ impl<'clipboard> Set<'clipboard> {
 	}
 
 	pub(crate) fn image_png(&mut self, data: &[u8], clear: bool) -> Result<(), Error> {
-		use objc2_app_kit::NSPasteboardTypePNG;
-
 		if clear {
 			self.clipboard.clear();
 		}
@@ -582,39 +591,88 @@ impl<'clipboard> Set<'clipboard> {
 				Ok(())
 			} else {
 				Err(Error::Unknown {
-					description: "NSPasteboard#writeObjects: returned false".into(),
+					description: "NSPasteboard#setData_forType: returned false".into(),
 				})
 			}
 		})
 	}
 
-	// It may be better to use `writeObjects` to set multiple formats at once.
-	// ```rust
-	// 		let mut write_objects = vec![];
-	// 		unsafe {
-	// 			let item = objc2_app_kit::NSPasteboardItem::new();
-	// 			item.setString_forType(&NSString::from_str("string"), NSPasteboardTypeString);
-	// 			write_objects.push(item);
-	// 		}
-	//		self.clipboard.pasteboard.writeObjects(&NSArray::from_vec(write_objects));
-	// ```
-	// But it's not clear how to set image data in `image_pixels()`.
-	//
-	// Current implementation is working fine.
-	pub(crate) fn formats(mut self, data: &[ClipboardData]) -> Result<(), Error> {
+	pub(crate) fn formats(self, data: &[ClipboardData]) -> Result<(), Error> {
 		self.clipboard.clear();
-		for d in data {
-			match d {
-				ClipboardData::Text(data) => self.text_(Cow::Borrowed(data), false)?,
-				ClipboardData::Rtf(data) => self.rtf_(Cow::Borrowed(data), false)?,
-				ClipboardData::Html(data) => self.html_(Cow::Borrowed(data), None, false)?,
-				ClipboardData::Image(data) => self.image_(data.clone(), false)?,
-				ClipboardData::Special((format_name, data)) => {
-					self.special_(format_name, data, false)?
+
+		autoreleasepool(|_| unsafe {
+			let mut write_objects: Vec<Id<ProtocolObject<(dyn NSPasteboardWriting + 'static)>>> =
+				vec![];
+			for d in data {
+				match d {
+					ClipboardData::Text(data) => {
+						let item = objc2_app_kit::NSPasteboardItem::new();
+						item.setString_forType(&NSString::from_str(&data), NSPasteboardTypeString);
+						write_objects.push(ProtocolObject::from_id(item));
+					}
+					ClipboardData::Rtf(data) => {
+						let item = objc2_app_kit::NSPasteboardItem::new();
+						item.setString_forType(&NSString::from_str(&data), NSPasteboardTypeRTF);
+						write_objects.push(ProtocolObject::from_id(item));
+					}
+					ClipboardData::Html(data) => {
+						let item = objc2_app_kit::NSPasteboardItem::new();
+						item.setString_forType(&NSString::from_str(&data), NSPasteboardTypeHTML);
+						write_objects.push(ProtocolObject::from_id(item));
+					}
+					ClipboardData::Image(data) => match data {
+						ImageData::Rgba(data) => {
+							let pixels = data.bytes.clone().into();
+							let image = image_from_pixels(pixels, data.width, data.height)
+								.map_err(|_| Error::ConversionFailure)?;
+							write_objects.push(ProtocolObject::from_id(image));
+						}
+						ImageData::Png(data) => {
+							let nsdata: *const objc2_foundation::NSData = msg_send![class!(NSData), dataWithBytes:data.as_ptr() as *const c_void length:data.len() as u64];
+							if nsdata.is_null() {
+								return Err(Error::Unknown {
+									description: "Failed to create NSData from bytes".into(),
+								});
+							}
+							let item = objc2_app_kit::NSPasteboardItem::new();
+							item.setData_forType(&*(nsdata as *const NSData), NSPasteboardTypePNG);
+							write_objects.push(ProtocolObject::from_id(item));
+						}
+						ImageData::Svg(data) => {
+							let item = objc2_app_kit::NSPasteboardItem::new();
+							item.setString_forType(
+								&NSString::from_str(&data),
+								&NSString::from_str(NS_PASTEBOARD_TYPE_SVG),
+							);
+							write_objects.push(ProtocolObject::from_id(item));
+						}
+					},
+					ClipboardData::Special((format_name, data)) => {
+						let nsdata: *const objc2_foundation::NSData = msg_send![class!(NSData), dataWithBytes:data.as_ptr() as *const c_void length:data.len() as u64];
+						if nsdata.is_null() {
+							return Err(Error::Unknown {
+								description: "Failed to create NSData from bytes".into(),
+							});
+						}
+						let item = objc2_app_kit::NSPasteboardItem::new();
+						item.setData_forType(
+							&*(nsdata as *const NSData),
+							&NSString::from_str(format_name),
+						);
+						write_objects.push(ProtocolObject::from_id(item));
+					}
+					_ => {}
 				}
-				_ => {}
 			}
-		}
+
+			if !self.clipboard.pasteboard.writeObjects(&NSArray::from_vec(write_objects)) {
+				return Err(Error::Unknown {
+					description: "NSPasteboard#writeObjects: returned false".into(),
+				});
+			}
+			Ok(())
+		})?;
+
 		Ok(())
 	}
 }
