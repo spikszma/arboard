@@ -9,6 +9,7 @@ and conditions of the chosen license apply to this file.
 */
 
 use std::borrow::Cow;
+use serde_derive::{Deserialize, Serialize};
 
 /// An error that might happen during a clipboard operation.
 ///
@@ -106,7 +107,7 @@ pub enum ClipboardFormat<'a> {
 	Special(&'a str),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClipboardData {
 	Unsupported,
 	Text(String),
@@ -117,7 +118,7 @@ pub enum ClipboardData {
 	None,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ImageData<'a> {
 	Rgba(ImageRgba<'a>),
 	Png(Cow<'a, [u8]>),
@@ -151,7 +152,7 @@ pub enum ImageData<'a> {
 ///     bytes: Cow::from(bytes.as_ref())
 /// };
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageRgba<'a> {
 	pub width: usize,
 	pub height: usize,
