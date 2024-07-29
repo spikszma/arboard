@@ -337,7 +337,10 @@ impl<'clipboard> Get<'clipboard> {
 								break;
 							}
 							Err(Error::ContentNotAvailable) => {}
-							Err(e) => return Err(e),
+							Err(e) => {
+								log::debug!("Error reading image: {:?}", e);
+								break;
+							}
 						},
 						ClipboardFormat::ImagePng => match self.image_png() {
 							Ok(image) => {
@@ -345,7 +348,10 @@ impl<'clipboard> Get<'clipboard> {
 								break;
 							}
 							Err(Error::ContentNotAvailable) => {}
-							Err(e) => return Err(e),
+							Err(e) => {
+								log::debug!("Error reading image: {:?}", e);
+								break;
+							}
 						},
 						ClipboardFormat::ImageSvg => match self.image_svg() {
 							Ok(image) => {
@@ -353,7 +359,10 @@ impl<'clipboard> Get<'clipboard> {
 								break;
 							}
 							Err(Error::ContentNotAvailable) => {}
-							Err(e) => return Err(e),
+							Err(e) => {
+								log::debug!("Error reading image: {:?}", e);
+								break;
+							}
 						},
 						ClipboardFormat::Special(format_name) => {
 							if let Some(data) =

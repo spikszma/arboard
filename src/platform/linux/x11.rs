@@ -1084,32 +1084,50 @@ impl Clipboard {
 				ClipboardFormat::Text => match self.get_text(selection) {
 					Ok(text) => results.push(ClipboardData::Text(text)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-					Err(e) => return Err(e),
+					Err(e) => {
+						log::debug!("Error while getting text: {:?}", e);
+						results.push(ClipboardData::None);
+					}
 				},
 				ClipboardFormat::Rtf => match self.get_rtf(selection) {
 					Ok(rtf) => results.push(ClipboardData::Rtf(rtf)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-					Err(e) => return Err(e),
+					Err(e) => {
+						log::debug!("Error while getting rtf: {:?}", e);
+						results.push(ClipboardData::None);
+					}
 				},
 				ClipboardFormat::Html => match self.get_html(selection) {
 					Ok(html) => results.push(ClipboardData::Html(html)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-					Err(e) => return Err(e),
+					Err(e) => {
+						log::debug!("Error while getting html: {:?}", e);
+						results.push(ClipboardData::None);
+					}
 				},
 				ClipboardFormat::ImageRgba => match self.get_image_rgba(selection) {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-					Err(e) => return Err(e),
+					Err(e) => {
+						log::debug!("Error while getting image: {:?}", e);
+						results.push(ClipboardData::None);
+					}
 				},
 				ClipboardFormat::ImagePng => match self.get_image_png(selection) {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-					Err(e) => return Err(e),
+					Err(e) => {
+						log::debug!("Error while getting image: {:?}", e);
+						results.push(ClipboardData::None);
+					}
 				},
 				ClipboardFormat::ImageSvg => match self.get_image_svg(selection) {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-					Err(e) => return Err(e),
+					Err(e) => {
+						log::debug!("Error while getting image: {:?}", e);
+						results.push(ClipboardData::None);
+					}
 				},
 				ClipboardFormat::Special(format_name) => {
 					match self.get_special(format_name, selection) {
@@ -1117,7 +1135,10 @@ impl Clipboard {
 							results.push(ClipboardData::Special((format_name.to_string(), data)))
 						}
 						Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-						Err(e) => return Err(e),
+						Err(e) => {
+							log::debug!("Error while getting special: {:?}", e);
+							results.push(ClipboardData::None);
+						}
 					}
 				}
 			}
