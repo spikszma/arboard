@@ -697,39 +697,60 @@ impl<'clipboard> Get<'clipboard> {
 				ClipboardFormat::Text => match Self::text_() {
 					Ok(text) => results.push(ClipboardData::Text(text)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-					Err(e) => return Err(e),
+					Err(e) => {
+						log::debug!("Error reading text from clipboard: {}", e);
+						results.push(ClipboardData::None)
+					}
 				},
 				ClipboardFormat::Rtf => match Self::rtf_() {
 					Ok(rtf) => results.push(ClipboardData::Rtf(rtf)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-					Err(e) => return Err(e),
+					Err(e) => {
+						log::debug!("Error reading RTF from clipboard: {}", e);
+						results.push(ClipboardData::None)
+					}
 				},
 				ClipboardFormat::Html => match Self::html_() {
 					Ok(html) => results.push(ClipboardData::Html(html)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-					Err(e) => return Err(e),
+					Err(e) => {
+						log::debug!("Error reading HTML from clipboard: {}", e);
+						results.push(ClipboardData::None)
+					}
 				},
 				ClipboardFormat::ImageRgba => match Self::image_dibv5() {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-					Err(e) => return Err(e),
+					Err(e) => {
+						log::debug!("Error reading image from clipboard: {}", e);
+						results.push(ClipboardData::None)
+					}
 				},
 				ClipboardFormat::ImagePng => match Self::image_png() {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-					Err(e) => return Err(e),
+					Err(e) => {
+						log::debug!("Error reading PNG from clipboard: {}", e);
+						results.push(ClipboardData::None)
+					}
 				},
 				ClipboardFormat::ImageSvg => match Self::image_svg() {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-					Err(e) => return Err(e),
+					Err(e) => {
+						log::debug!("Error reading SVG from clipboard: {}", e);
+						results.push(ClipboardData::None)
+					}
 				},
 				ClipboardFormat::Special(format_name) => match Self::special_(format_name) {
 					Ok(data) => {
 						results.push(ClipboardData::Special((format_name.to_string(), data)))
 					}
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
-					Err(e) => return Err(e),
+					Err(e) => {
+						log::debug!("Error reading special format from clipboard: {}", e);
+						results.push(ClipboardData::None)
+					}
 				},
 			}
 		}
