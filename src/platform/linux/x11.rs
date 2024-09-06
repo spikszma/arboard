@@ -1079,6 +1079,8 @@ impl Clipboard {
 		selection: LinuxClipboardKind,
 	) -> Result<Vec<ClipboardData>, Error> {
 		let mut results = Vec::new();
+		let mut err = None;
+		let mut err_count = 0;
 		for format in formats {
 			match format {
 				ClipboardFormat::Text => match self.get_text(selection) {
@@ -1087,6 +1089,8 @@ impl Clipboard {
 					Err(e) => {
 						log::debug!("Error while getting text: {:?}", e);
 						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
 					}
 				},
 				ClipboardFormat::Rtf => match self.get_rtf(selection) {
@@ -1095,6 +1099,8 @@ impl Clipboard {
 					Err(e) => {
 						log::debug!("Error while getting rtf: {:?}", e);
 						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
 					}
 				},
 				ClipboardFormat::Html => match self.get_html(selection) {
@@ -1103,6 +1109,8 @@ impl Clipboard {
 					Err(e) => {
 						log::debug!("Error while getting html: {:?}", e);
 						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
 					}
 				},
 				ClipboardFormat::ImageRgba => match self.get_image_rgba(selection) {
@@ -1111,6 +1119,8 @@ impl Clipboard {
 					Err(e) => {
 						log::debug!("Error while getting image: {:?}", e);
 						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
 					}
 				},
 				ClipboardFormat::ImagePng => match self.get_image_png(selection) {
@@ -1119,6 +1129,8 @@ impl Clipboard {
 					Err(e) => {
 						log::debug!("Error while getting image: {:?}", e);
 						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
 					}
 				},
 				ClipboardFormat::ImageSvg => match self.get_image_svg(selection) {
@@ -1127,6 +1139,8 @@ impl Clipboard {
 					Err(e) => {
 						log::debug!("Error while getting image: {:?}", e);
 						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
 					}
 				},
 				ClipboardFormat::Special(format_name) => {
@@ -1138,12 +1152,23 @@ impl Clipboard {
 						Err(e) => {
 							log::debug!("Error while getting special: {:?}", e);
 							results.push(ClipboardData::None);
+							err = Some(e);
+							err_count += 1;
 						}
 					}
 				}
 			}
 		}
-		Ok(results)
+		if err_count == formats.len() {
+			if let Some(e) = err {
+				Err(e)
+			} else {
+				// unreachable!() because `err_count == formats.len()`
+				Ok(results)
+			}
+		} else {
+			Ok(results)
+		}
 	}
 
 	pub(crate) fn set_formats(

@@ -692,6 +692,8 @@ impl<'clipboard> Get<'clipboard> {
 		let _clipboard_assertion = self.clipboard?;
 
 		let mut results = Vec::new();
+		let mut err = None;
+		let mut err_count = 0;
 		for format in formats.iter() {
 			match format {
 				ClipboardFormat::Text => match Self::text_() {
@@ -699,7 +701,9 @@ impl<'clipboard> Get<'clipboard> {
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => {
 						log::debug!("Error reading text from clipboard: {}", e);
-						results.push(ClipboardData::None)
+						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
 					}
 				},
 				ClipboardFormat::Rtf => match Self::rtf_() {
@@ -707,7 +711,9 @@ impl<'clipboard> Get<'clipboard> {
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => {
 						log::debug!("Error reading RTF from clipboard: {}", e);
-						results.push(ClipboardData::None)
+						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
 					}
 				},
 				ClipboardFormat::Html => match Self::html_() {
@@ -715,7 +721,9 @@ impl<'clipboard> Get<'clipboard> {
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => {
 						log::debug!("Error reading HTML from clipboard: {}", e);
-						results.push(ClipboardData::None)
+						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
 					}
 				},
 				ClipboardFormat::ImageRgba => match Self::image_dibv5() {
@@ -723,7 +731,9 @@ impl<'clipboard> Get<'clipboard> {
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => {
 						log::debug!("Error reading image from clipboard: {}", e);
-						results.push(ClipboardData::None)
+						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
 					}
 				},
 				ClipboardFormat::ImagePng => match Self::image_png() {
@@ -731,7 +741,9 @@ impl<'clipboard> Get<'clipboard> {
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => {
 						log::debug!("Error reading PNG from clipboard: {}", e);
-						results.push(ClipboardData::None)
+						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
 					}
 				},
 				ClipboardFormat::ImageSvg => match Self::image_svg() {
@@ -739,7 +751,9 @@ impl<'clipboard> Get<'clipboard> {
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => {
 						log::debug!("Error reading SVG from clipboard: {}", e);
-						results.push(ClipboardData::None)
+						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
 					}
 				},
 				ClipboardFormat::Special(format_name) => match Self::special_(format_name) {
@@ -749,13 +763,24 @@ impl<'clipboard> Get<'clipboard> {
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => {
 						log::debug!("Error reading special format from clipboard: {}", e);
-						results.push(ClipboardData::None)
+						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
 					}
 				},
 			}
 		}
 
-		Ok(results)
+		if err_count == formats.len() {
+			if let Some(e) = err {
+				Err(e)
+			} else {
+				// unreachable!() because `err_count == formats.len()`
+				Ok(results)
+			}
+		} else {
+			Ok(results)
+		}
 	}
 }
 
