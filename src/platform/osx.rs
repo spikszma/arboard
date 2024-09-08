@@ -8,8 +8,10 @@ the Apache 2.0 or the MIT license at the licensee's choice. The terms
 and conditions of the chosen license apply to this file.
 */
 
-use crate::common::{ImageData, ImageRgba};
-use crate::{common::Error, ClipboardData, ClipboardFormat};
+use crate::{
+	common::{into_unknown, Error, ImageData, ImageRgba},
+	ClipboardData, ClipboardFormat,
+};
 use objc2::{
 	class, msg_send, msg_send_id,
 	rc::{autoreleasepool, Id},
@@ -21,9 +23,9 @@ use objc2_app_kit::{
 	NSPasteboardTypeString, NSPasteboardWriting,
 };
 use objc2_foundation::{NSArray, NSData, NSString};
-use std::os::raw::c_void;
 use std::{
 	borrow::Cow,
+	os::raw::c_void,
 	panic::{RefUnwindSafe, UnwindSafe},
 };
 
@@ -248,7 +250,7 @@ impl<'clipboard> Get<'clipboard> {
 			let data = Cursor::new(image_data.bytes());
 
 			let reader = image::io::Reader::with_format(data, image::ImageFormat::Tiff);
-			reader.decode().map_err(|_| Error::ConversionFailure)
+			reader.decode().map_err(|e| into_unknown("failed to decode tiff", e))
 		})?;
 
 		let rgba = image.into_rgba8();
@@ -510,7 +512,7 @@ impl<'clipboard> Set<'clipboard> {
 
 		let pixels = data.bytes.into();
 		let image = image_from_pixels(pixels, data.width, data.height)
-			.map_err(|_| Error::ConversionFailure)?;
+			.map_err(|e| into_unknown("failed to get image from pixels", e))?;
 
 		let image_array = NSArray::from_vec(vec![ProtocolObject::from_id(image)]);
 		let success = unsafe { self.clipboard.pasteboard.writeObjects(&image_array) };
@@ -633,7 +635,7 @@ impl<'clipboard> Set<'clipboard> {
 						ImageData::Rgba(data) => {
 							let pixels = data.bytes.clone().into();
 							let image = image_from_pixels(pixels, data.width, data.height)
-								.map_err(|_| Error::ConversionFailure)?;
+								.map_err(|e| into_unknown("failed to get rgba from pixels", e))?;
 							write_objects.push(ProtocolObject::from_id(image));
 						}
 						ImageData::Png(data) => {

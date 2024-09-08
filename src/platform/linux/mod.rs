@@ -3,17 +3,15 @@ use std::{borrow::Cow, time::Instant};
 #[cfg(feature = "wayland-data-control")]
 use log::{trace, warn};
 
-use crate::{common::private, ClipboardData, ClipboardFormat, Error};
-use crate::{ImageData, ImageRgba};
+use crate::{
+	common::{into_unknown, private},
+	ClipboardData, ClipboardFormat, Error, ImageData, ImageRgba,
+};
 
 mod x11;
 
 #[cfg(feature = "wayland-data-control")]
 mod wayland;
-
-fn into_unknown<E: std::fmt::Display>(error: E) -> Error {
-	Error::Unknown { description: error.to_string() }
-}
 
 fn encode_as_png(image: &ImageRgba) -> Result<Vec<u8>, Error> {
 	use image::ImageEncoder as _;
@@ -31,7 +29,7 @@ fn encode_as_png(image: &ImageRgba) -> Result<Vec<u8>, Error> {
 			image.height as u32,
 			image::ExtendedColorType::Rgba8,
 		)
-		.map_err(|_| Error::ConversionFailure)?;
+		.map_err(|e| into_unknown("failed to write png", e))?;
 
 	Ok(png_bytes)
 }

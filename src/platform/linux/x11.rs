@@ -146,7 +146,7 @@ impl XContext {
 			.roots
 			.get(screen_num)
 			.ok_or(Error::Unknown { description: String::from("no screen found") })?;
-		let win_id = conn.generate_id().map_err(into_unknown)?;
+		let win_id = conn.generate_id().map_err(|e| into_unknown("failed to gen id", e))?;
 
 		let event_mask =
             // Just in case that some program reports SelectionNotify events
@@ -170,8 +170,8 @@ impl XContext {
 			// don't subscribe to any special events because we are requesting everything we need ourselves
 			&CreateWindowAux::new().event_mask(event_mask),
 		)
-		.map_err(into_unknown)?;
-		conn.flush().map_err(into_unknown)?;
+		.map_err(|e| into_unknown("failed to create window", e))?;
+		conn.flush().map_err(|e| into_unknown("failed to flush conn", e))?;
 
 		Ok(Self { conn, win_id })
 	}
@@ -205,8 +205,10 @@ enum ReadSelNotifyResult {
 impl Inner {
 	fn new() -> Result<Self> {
 		let server = XContext::new()?;
-		let atoms =
-			Atoms::new(&server.conn).map_err(into_unknown)?.reply().map_err(into_unknown)?;
+		let atoms = Atoms::new(&server.conn)
+			.map_err(|e| into_unknown("failed to new atoms", e))?
+			.reply()
+			.map_err(|e| into_unknown("failed to reply", e))?;
 
 		Ok(Self {
 			server,
@@ -241,7 +243,7 @@ impl Inner {
 			.set_selection_owner(server_win, self.atom_of(selection), Time::CURRENT_TIME)
 			.map_err(|_| Error::ClipboardOccupied)?;
 
-		self.server.conn.flush().map_err(into_unknown)?;
+		self.server.conn.flush().map_err(|e| into_unknown("failed to flush conn", e))?;
 
 		// Just setting the data, and the `serve_requests` will take care of the rest.
 		let selection = self.selection_of(selection);
@@ -322,7 +324,7 @@ impl Inner {
 		reader
 			.conn
 			.delete_property(reader.win_id, self.atoms.ARBOARD_CLIPBOARD)
-			.map_err(into_unknown)?;
+			.map_err(|e| into_unknown("failed to delete clipboard property", e))?;
 
 		// request to convert the clipboard selection to our data type(s)
 		reader
@@ -334,8 +336,8 @@ impl Inner {
 				self.atoms.ARBOARD_CLIPBOARD,
 				Time::CURRENT_TIME,
 			)
-			.map_err(into_unknown)?;
-		reader.conn.sync().map_err(into_unknown)?;
+			.map_err(|e| into_unknown("failed to convert selection", e))?;
+		reader.conn.sync().map_err(|e| into_unknown("failed to sync conn", e))?;
 
 		trace!("Finished `convert_selection`");
 
@@ -345,7 +347,8 @@ impl Inner {
 		let mut timeout_end = Instant::now() + LONG_TIMEOUT_DUR;
 
 		while Instant::now() < timeout_end {
-			let event = reader.conn.poll_for_event().map_err(into_unknown)?;
+			let event =
+				reader.conn.poll_for_event().map_err(|e| into_unknown("failed to poll", e))?;
 			let event = match event {
 				Some(e) => e,
 				None => {
@@ -428,9 +431,9 @@ impl Inner {
 			.server
 			.conn
 			.get_selection_owner(self.atom_of(selection))
-			.map_err(into_unknown)?
+			.map_err(|e| into_unknown("failed to get selection owner", e))?
 			.reply()
-			.map_err(into_unknown)?
+			.map_err(|e| into_unknown("failed to reply if is owner", e))?
 			.owner;
 
 		Ok(current == self.server.win_id)
@@ -441,12 +444,12 @@ impl Inner {
 			self.server
 				.conn
 				.get_atom_name(atom)
-				.map_err(into_unknown)?
+				.map_err(|e| into_unknown("failed to get atom name", e))?
 				.reply()
-				.map_err(into_unknown)?
+				.map_err(|e| into_unknown("failed to reply atom name", e))?
 				.name,
 		)
-		.map_err(into_unknown)
+		.map_err(|e| into_unknown("failed to convert atom name to utf8", e))
 	}
 	fn atom_name_dbg(&self, atom: x11rb::protocol::xproto::Atom) -> &'static str {
 		ATOM_NAME_CACHE.with(|cache| {
@@ -493,9 +496,9 @@ impl Inner {
 		let mut reply = reader
 			.conn
 			.get_property(true, event.requestor, event.property, event.target, 0, u32::MAX / 4)
-			.map_err(into_unknown)?
+			.map_err(|e| into_unknown("failed to get property", e))?
 			.reply()
-			.map_err(into_unknown)?;
+			.map_err(|e| into_unknown("failed to reply getting property", e))?;
 
 		// trace!("Property.type: {:?}", self.atom_name(reply.type_));
 
@@ -517,9 +520,9 @@ impl Inner {
 					0,
 					u32::MAX / 4,
 				)
-				.map_err(into_unknown)?
+				.map_err(|e| into_unknown("failed to get property", e))?
 				.reply()
-				.map_err(into_unknown)?;
+				.map_err(|e| into_unknown("failed to reply getting property", e))?;
 			log::trace!("Receiving INCR segments");
 			*using_incr = true;
 			if reply.value_len == 4 {
@@ -556,9 +559,9 @@ impl Inner {
 		let reply = reader
 			.conn
 			.get_property(true, event.window, event.atom, target_format, 0, u32::MAX / 4)
-			.map_err(into_unknown)?
+			.map_err(|e| into_unknown("failed to get property", e))?
 			.reply()
-			.map_err(into_unknown)?;
+			.map_err(|e| into_unknown("failed to reply getting property", e))?;
 
 		// log::trace!("Received segment. value_len {}", reply.value_len,);
 		if reply.value_len == 0 {
@@ -612,8 +615,8 @@ impl Inner {
 					self.atoms.ATOM,
 					&targets,
 				)
-				.map_err(into_unknown)?;
-			self.server.conn.flush().map_err(into_unknown)?;
+				.map_err(|e| into_unknown("failed to change property32", e))?;
+			self.server.conn.flush().map_err(|e| into_unknown("failed to flush conn", e))?;
 			success = true;
 		} else {
 			trace!("Handling request for (probably) the clipboard contents.");
@@ -630,8 +633,11 @@ impl Inner {
 								event.target,
 								&data.bytes,
 							)
-							.map_err(into_unknown)?;
-						self.server.conn.flush().map_err(into_unknown)?;
+							.map_err(|e| into_unknown("failed to change property8", e))?;
+						self.server
+							.conn
+							.flush()
+							.map_err(|e| into_unknown("failed to flush conn", e))?;
 						true
 					}
 					None => false,
@@ -662,9 +668,9 @@ impl Inner {
 					property,
 				},
 			)
-			.map_err(into_unknown)?;
+			.map_err(|e| into_unknown("failed to send event", e))?;
 
-		self.server.conn.flush().map_err(into_unknown)
+		self.server.conn.flush().map_err(|e| into_unknown("failed to send flush", e))
 	}
 
 	fn ask_clipboard_manager_to_request_our_data(&self) -> Result<()> {
@@ -698,8 +704,8 @@ impl Inner {
 				self.atoms.ARBOARD_CLIPBOARD,
 				Time::CURRENT_TIME,
 			)
-			.map_err(into_unknown)?;
-		self.server.conn.flush().map_err(into_unknown)?;
+			.map_err(|e| into_unknown("failed to convert selection", e))?;
+		self.server.conn.flush().map_err(|e| into_unknown("failed to flush conn", e))?;
 
 		*handover_state = ManagerHandoverState::InProgress;
 		let max_handover_duration = Duration::from_millis(100);
@@ -743,7 +749,12 @@ fn serve_requests(context: Arc<Inner>) -> Result<(), Box<dyn std::error::Error>>
 	let mut notified = false;
 
 	loop {
-		match context.server.conn.wait_for_event().map_err(into_unknown)? {
+		match context
+			.server
+			.conn
+			.wait_for_event()
+			.map_err(|e| into_unknown("failed to wait for event", e))?
+		{
 			Event::DestroyNotify(_) => {
 				// This window is being destroyed.
 				trace!("Clipboard server window is being destroyed x_x");
@@ -776,7 +787,9 @@ fn serve_requests(context: Arc<Inner>) -> Result<(), Box<dyn std::error::Error>>
 					context.atom_name_dbg(event.target),
 				);
 				// Someone is requesting the clipboard content from us.
-				context.handle_selection_request(event).map_err(into_unknown)?;
+				context
+					.handle_selection_request(event)
+					.map_err(|e| into_unknown("failed to handle selection request", e))?;
 
 				// if we are in the progress of saving to the clipboard manager
 				// make sure we save that we have finished writing
@@ -870,7 +883,8 @@ impl Clipboard {
 			// See: https://stackoverflow.com/questions/28169745/what-are-the-options-to-convert-iso-8859-1-latin-1-to-a-string-utf-8
 			Ok(result.bytes.into_iter().map(|c| c as char).collect())
 		} else {
-			String::from_utf8(result.bytes).map_err(|_| Error::ConversionFailure)
+			String::from_utf8(result.bytes)
+				.map_err(|e| into_unknown("failed to convert from utf8", e))
 		}
 	}
 
@@ -894,7 +908,7 @@ impl Clipboard {
 	pub(crate) fn get_rtf(&self, selection: LinuxClipboardKind) -> Result<String> {
 		let formats = [self.inner.atoms.RTF];
 		let result = self.inner.read(&formats, selection)?;
-		String::from_utf8(result.bytes).map_err(|_| Error::ConversionFailure)
+		String::from_utf8(result.bytes).map_err(|e| into_unknown("failed to convert from utf8", e))
 	}
 
 	pub(crate) fn set_rtf(
@@ -914,7 +928,7 @@ impl Clipboard {
 	pub(crate) fn get_html(&self, selection: LinuxClipboardKind) -> Result<String> {
 		let formats = [self.inner.atoms.HTML];
 		let result = self.inner.read(&formats, selection)?;
-		String::from_utf8(result.bytes).map_err(|_| Error::ConversionFailure)
+		String::from_utf8(result.bytes).map_err(|e| into_unknown("failed to convert from utf8", e))
 	}
 
 	pub(crate) fn set_html(
@@ -971,7 +985,8 @@ impl Clipboard {
 	) -> Result<ImageData<'static>> {
 		let formats = [self.inner.atoms.SVG_MIME];
 		let bytes = self.inner.read(&formats, selection)?.bytes;
-		let svg = String::from_utf8(bytes).map_err(|_| Error::ConversionFailure)?;
+		let svg =
+			String::from_utf8(bytes).map_err(|e| into_unknown("failed to convert from utf8", e))?;
 		Ok(ImageData::svg(svg))
 	}
 
@@ -1041,9 +1056,9 @@ impl Clipboard {
 			.server
 			.conn
 			.intern_atom(false, format_name.as_bytes())
-			.map_err(into_unknown)?
+			.map_err(|e| into_unknown("failed to get atom identifier", e))?
 			.reply()
-			.map_err(into_unknown)?
+			.map_err(|e| into_unknown("failed to reply", e))?
 			.atom;
 		let formats = [atom];
 		self.inner.read(&formats, selection).map(|data| data.bytes)
@@ -1066,9 +1081,9 @@ impl Clipboard {
 			.server
 			.conn
 			.intern_atom(false, format_name.as_bytes())
-			.map_err(into_unknown)?
+			.map_err(|e| into_unknown("failed to get atom identifier", e))?
 			.reply()
-			.map_err(into_unknown)?
+			.map_err(|e| into_unknown("failed to reply", e))?
 			.atom;
 		Ok(ClipboardDataX11 { bytes: data.to_vec(), format: atom })
 	}
