@@ -48,7 +48,7 @@ impl Clipboard {
 	pub(crate) fn new() -> Result<Self, Error> {
 		// Check if it's possible to communicate with the wayland compositor
 		if let Err(e) = is_primary_selection_supported() {
-			return Err(into_unknown(e));
+			return Err(into_unknown("failed to check is_primary_selection_supported", e));
 		}
 		Ok(Self {})
 	}
@@ -62,9 +62,9 @@ impl Clipboard {
 		let mut opts = Options::new();
 		opts.foreground(matches!(wait, WaitConfig::Forever));
 		opts.clipboard(selection.try_into()?);
-		opts.copy(source.source, source.mime_type).map_err(|e| match e {
+		opts.copy(source.source, source.mime_type.clone()).map_err(|e| match e {
 			CopyError::PrimarySelectionUnsupported => Error::ClipboardNotSupported,
-			other => into_unknown(other),
+			other => into_unknown(&format!("failed to copy clipboard with {:?}", source.mime_type), other),
 		})
 	}
 
@@ -79,7 +79,7 @@ impl Clipboard {
 		opts.clipboard(selection.try_into()?);
 		opts.copy_multi(sources).map_err(|e| match e {
 			CopyError::PrimarySelectionUnsupported => Error::ClipboardNotSupported,
-			other => into_unknown(other),
+			other => into_unknown("failed to copy multi sources", other),
 		})
 	}
 
@@ -136,8 +136,10 @@ impl Clipboard {
 		match result {
 			Ok((mut pipe, _)) => {
 				let mut contents = vec![];
-				pipe.read_to_end(&mut contents).map_err(into_unknown)?;
-				String::from_utf8(contents).map_err(|_| Error::ConversionFailure)
+				pipe.read_to_end(&mut contents)
+					.map_err(|e| into_unknown("failed to read pipe", e))?;
+				String::from_utf8(contents)
+					.map_err(|e| into_unknown("failed to convert from utf8", e))
 			}
 
 			Err(PasteError::ClipboardEmpty) | Err(PasteError::NoMimeType) => {
@@ -196,7 +198,8 @@ impl Clipboard {
 		match result {
 			Ok((mut pipe, _mime_type)) => {
 				let mut buffer = vec![];
-				pipe.read_to_end(&mut buffer).map_err(into_unknown)?;
+				pipe.read_to_end(&mut buffer)
+					.map_err(|e| into_unknown("failed to read pipe", e))?;
 				let image_data = super::decode_from_png(buffer)?;
 				Ok(ImageData::Rgba(image_data))
 			}
@@ -220,7 +223,8 @@ impl Clipboard {
 		match result {
 			Ok((mut pipe, _mime_type)) => {
 				let mut buffer = vec![];
-				pipe.read_to_end(&mut buffer).map_err(into_unknown)?;
+				pipe.read_to_end(&mut buffer)
+					.map_err(|e| into_unknown("failed to read pipe", e))?;
 				Ok(ImageData::png(buffer.into()))
 			}
 
@@ -243,8 +247,12 @@ impl Clipboard {
 		match result {
 			Ok((mut pipe, _mime_type)) => {
 				let mut buffer = vec![];
-				pipe.read_to_end(&mut buffer).map_err(into_unknown)?;
-				Ok(ImageData::svg(String::from_utf8(buffer).map_err(|_| Error::ConversionFailure)?))
+				pipe.read_to_end(&mut buffer)
+					.map_err(|e| into_unknown("failed to read pipe", e))?;
+				Ok(ImageData::svg(
+					String::from_utf8(buffer)
+						.map_err(|e| into_unknown("failed to convert from utf8", e))?,
+				))
 			}
 
 			Err(PasteError::ClipboardEmpty) | Err(PasteError::NoMimeType) => {
@@ -322,7 +330,8 @@ impl Clipboard {
 		match result {
 			Ok((mut pipe, _mime_type)) => {
 				let mut buffer = vec![];
-				pipe.read_to_end(&mut buffer).map_err(into_unknown)?;
+				pipe.read_to_end(&mut buffer)
+					.map_err(|e| into_unknown("failed to read pipe", e))?;
 				Ok(buffer)
 			}
 

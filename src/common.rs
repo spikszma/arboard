@@ -59,7 +59,7 @@ impl std::fmt::Display for Error {
 			Error::ClipboardNotSupported => f.write_str("The selected clipboard is not supported with the current system configuration."),
 			Error::ClipboardOccupied => f.write_str("The native clipboard is not accessible due to being held by an other party."),
 			Error::ConversionFailure => f.write_str("The image or the text that was about the be transferred to/from the clipboard could not be converted to the appropriate format."),
-			Error::Unknown { description } => f.write_fmt(format_args!("Unknown error while interacting with the clipboard: {description}")),
+			Error::Unknown { description } => f.write_fmt(format_args!("arboard: {description}")),
 		}
 	}
 }
@@ -260,4 +260,9 @@ pub(crate) mod private {
 	impl Sealed for crate::Get<'_> {}
 	impl Sealed for crate::Set<'_> {}
 	impl Sealed for crate::Clear<'_> {}
+}
+
+#[inline]
+pub(crate) fn into_unknown<E: std::fmt::Display>(msg: &str, error: E) -> Error {
+	Error::Unknown { description: format!("{}, {}", msg, error) }
 }

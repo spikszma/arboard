@@ -8,26 +8,54 @@ the Apache 2.0 or the MIT license at the licensee's choice. The terms
 and conditions of the chosen license apply to this file.
 */
 
-use clipboard_win::{formats::Html, options, Getter};
-use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
-
-use crate::common::{ImageData, ImageRgba};
 use crate::{
-	common::{private, Error},
+	common::{into_unknown, private, Error, ImageData, ImageRgba},
 	ClipboardData, ClipboardFormat,
 };
+use clipboard_win::{formats::Html, options, Getter};
 use std::{borrow::Cow, marker::PhantomData, thread, time::Duration};
+use windows_sys::Win32::Foundation::{
+	ERROR_CLIPBOARD_NOT_OPEN, ERROR_IO_INCOMPLETE, ERROR_NOT_FOUND, ERROR_SUCCESS,
+};
 
 const CFSTR_MIME_RICHTEXT: &str = "text/richtext";
 const CFSTR_MIME_PNG: &str = "image/png";
 const CFSTR_MIME_SVG_XML: &str = "image/svg+xml";
 
+
+// If there're multiple threads or processes trying to access the clipboard at the same time,
+// the previous clipboard owner will fail to access the clipboard.
+// This is a common issue on Windows, so we just return `ClipboardOccupied` in this case.
+// The user can retry the operation later.
+#[inline]
+fn last_error(msg: &str) -> Error {
+	let last_err = std::io::Error::last_os_error();
+	let raw_os_error = last_err.raw_os_error().unwrap_or(ERROR_SUCCESS as _);
+	if raw_os_error == ERROR_CLIPBOARD_NOT_OPEN as _ || raw_os_error == ERROR_IO_INCOMPLETE as _ {
+		Error::ClipboardOccupied
+	} else if raw_os_error == ERROR_NOT_FOUND as _ {
+		Error::ContentNotAvailable
+	} else {
+		into_unknown(msg, last_err)
+	}
+}
+
+#[inline]
+fn map_error_code(msg: &str, error_code: clipboard_win::ErrorCode) -> Error {
+	let raw_code = error_code.raw_code();
+	if raw_code == ERROR_CLIPBOARD_NOT_OPEN as _ || raw_code == ERROR_IO_INCOMPLETE as _ {
+		Error::ClipboardOccupied
+	} else if raw_code == ERROR_NOT_FOUND as _ {
+		Error::ContentNotAvailable
+	} else {
+		into_unknown(msg, error_code)
+	}
+}
+
 mod image_data {
 	use super::*;
 	use crate::common::ScopeGuard;
-	use image::codecs::png::PngEncoder;
-	use image::ExtendedColorType;
-	use image::ImageEncoder;
+	use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 	use std::{convert::TryInto, ffi::c_void, io, mem::size_of, ptr::copy_nonoverlapping};
 	use windows_sys::Win32::{
 		Foundation::HGLOBAL,
@@ -42,11 +70,6 @@ mod image_data {
 			Ole::CF_DIBV5,
 		},
 	};
-
-	fn last_error(message: &str) -> Error {
-		let os_error = io::Error::last_os_error();
-		Error::unknown(format!("{}: {}", message, os_error))
-	}
 
 	unsafe fn global_unlock_checked(hdata: isize) {
 		// If the memory object is unlocked after decrementing the lock count, the function
@@ -143,7 +166,7 @@ mod image_data {
 				image.height as u32,
 				ExtendedColorType::Rgba8,
 			)
-			.map_err(|_| Error::ConversionFailure)?;
+			.map_err(|e| into_unknown("failed to write png from rgba", e))?;
 		add_png_file(&buf)
 	}
 
@@ -538,8 +561,9 @@ impl<'clipboard> Get<'clipboard> {
 			return Err(Error::ContentNotAvailable);
 		}
 
-		let text_size = clipboard_win::raw::size(FORMAT)
-			.ok_or_else(|| Error::unknown("failed to read clipboard text size"))?;
+		let Some(text_size) = clipboard_win::raw::size(FORMAT) else {
+			return Err(last_error("failed to read clipboard text size"));
+		};
 
 		// Allocate the specific number of WTF-16 characters we need to receive.
 		// This division is always accurate because Windows uses 16-bit characters.
@@ -551,7 +575,7 @@ impl<'clipboard> Get<'clipboard> {
 				unsafe { std::slice::from_raw_parts_mut(out.as_mut_ptr().cast(), out.len() * 2) };
 
 			let mut bytes_read = clipboard_win::raw::get(FORMAT, out)
-				.map_err(|_| Error::unknown("failed to read clipboard string"))?;
+				.map_err(|e| map_error_code("failed to read clipboard string", e))?;
 
 			// Convert the number of bytes read to the number of `u16`s
 			bytes_read /= 2;
@@ -567,7 +591,8 @@ impl<'clipboard> Get<'clipboard> {
 		};
 
 		// Create a UTF-8 string from WTF-16 data, if it was valid.
-		String::from_utf16(&out[..bytes_read]).map_err(|_| Error::ConversionFailure)
+		String::from_utf16(&out[..bytes_read])
+			.map_err(|e| into_unknown("failed to convert string from utf16", e))
 	}
 
 	pub(crate) fn rtf(self) -> Result<String, Error> {
@@ -586,7 +611,7 @@ impl<'clipboard> Get<'clipboard> {
 
 		let mut data = Vec::new();
 		clipboard_win::raw::get_vec(format, &mut data)
-			.map_err(|_| Error::unknown("failed to read clipboard image data"))?;
+			.map_err(|e| map_error_code("failed to read clipboard image data", e))?;
 		Ok(String::from_utf8_lossy(&data).into_owned())
 	}
 
@@ -602,16 +627,11 @@ impl<'clipboard> Get<'clipboard> {
 				match h.read_clipboard(&mut out) {
 					Ok(_s) => {}
 					Err(e) => {
-						if e.raw_code() == ERROR_NOT_FOUND as _ {
-							return Err(Error::ContentNotAvailable);
-						}
-						return Err(Error::unknown(format!(
-							"failed to read clipboard HTML, {}",
-							e
-						)));
+						return Err(map_error_code("failed to read clipboard html", e));
 					}
 				}
-				String::from_utf8(out).map_err(|_| Error::ConversionFailure)
+				String::from_utf8(out)
+					.map_err(|e| into_unknown("failed to write html from utf8", e))
 			}
 			None => Err(Error::ContentNotAvailable),
 		}
@@ -642,7 +662,7 @@ impl<'clipboard> Get<'clipboard> {
 		let mut data = Vec::new();
 
 		clipboard_win::raw::get_vec(FORMAT, &mut data)
-			.map_err(|_| Error::unknown("failed to read clipboard image data"))?;
+			.map_err(|e| map_error_code("failed to read clipboard image data", e))?;
 
 		image_data::read_cf_dibv5(&data)
 	}
@@ -655,7 +675,7 @@ impl<'clipboard> Get<'clipboard> {
 
 		let mut data = Vec::new();
 		clipboard_win::raw::get_vec(format, &mut data)
-			.map_err(|_| Error::unknown("failed to read clipboard image data"))?;
+			.map_err(|e| map_error_code("failed to read clipboard image data", e))?;
 		Ok(ImageData::png(data.into()))
 	}
 
@@ -667,7 +687,7 @@ impl<'clipboard> Get<'clipboard> {
 
 		let mut data = Vec::new();
 		clipboard_win::raw::get_vec(format, &mut data)
-			.map_err(|_| Error::unknown("failed to read clipboard image data"))?;
+			.map_err(|e| map_error_code("failed to read clipboard image data", e))?;
 		Ok(ImageData::Svg(String::from_utf8_lossy(&data).into_owned()))
 	}
 
@@ -684,7 +704,7 @@ impl<'clipboard> Get<'clipboard> {
 
 		let mut data = Vec::new();
 		clipboard_win::raw::get_vec(format, &mut data)
-			.map_err(|_| Error::unknown("failed to read clipboard data"))?;
+			.map_err(|e| map_error_code("failed to read clipboard data", e))?;
 		Ok(data)
 	}
 
@@ -695,15 +715,18 @@ impl<'clipboard> Get<'clipboard> {
 		let mut err = None;
 		let mut err_count = 0;
 		for format in formats.iter() {
+			let mut cur_err = None;
 			match format {
 				ClipboardFormat::Text => match Self::text_() {
-					Ok(text) => results.push(ClipboardData::Text(text)),
-					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Ok(text) => {
+						results.push(ClipboardData::Text(text));
+					}
+					Err(Error::ContentNotAvailable) => {
+						results.push(ClipboardData::None);
+					}
 					Err(e) => {
 						log::debug!("Error reading text from clipboard: {}", e);
-						results.push(ClipboardData::None);
-						err = Some(e);
-						err_count += 1;
+						cur_err = Some(e);
 					}
 				},
 				ClipboardFormat::Rtf => match Self::rtf_() {
@@ -711,49 +734,39 @@ impl<'clipboard> Get<'clipboard> {
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => {
 						log::debug!("Error reading RTF from clipboard: {}", e);
-						results.push(ClipboardData::None);
-						err = Some(e);
-						err_count += 1;
+						cur_err = Some(e);
 					}
 				},
 				ClipboardFormat::Html => match Self::html_() {
 					Ok(html) => results.push(ClipboardData::Html(html)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => {
-						log::debug!("Error reading HTML from clipboard: {}", e);
-						results.push(ClipboardData::None);
-						err = Some(e);
-						err_count += 1;
+						log::debug!("Error reading HTML from clipboard, {:?}", e);
+						cur_err = Some(e);
 					}
 				},
 				ClipboardFormat::ImageRgba => match Self::image_dibv5() {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => {
-						log::debug!("Error reading image from clipboard: {}", e);
-						results.push(ClipboardData::None);
-						err = Some(e);
-						err_count += 1;
+						log::debug!("Error reading image from clipboard, {:?}", e);
+						cur_err = Some(e);
 					}
 				},
 				ClipboardFormat::ImagePng => match Self::image_png() {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => {
-						log::debug!("Error reading PNG from clipboard: {}", e);
-						results.push(ClipboardData::None);
-						err = Some(e);
-						err_count += 1;
+						log::debug!("Error reading PNG from clipboard, {:?}", e);
+						cur_err = Some(e);
 					}
 				},
 				ClipboardFormat::ImageSvg => match Self::image_svg() {
 					Ok(image) => results.push(ClipboardData::Image(image)),
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => {
-						log::debug!("Error reading SVG from clipboard: {}", e);
-						results.push(ClipboardData::None);
-						err = Some(e);
-						err_count += 1;
+						log::debug!("Error reading SVG from clipboard, {:?}", e);
+						cur_err = Some(e);
 					}
 				},
 				ClipboardFormat::Special(format_name) => match Self::special_(format_name) {
@@ -762,12 +775,23 @@ impl<'clipboard> Get<'clipboard> {
 					}
 					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
 					Err(e) => {
-						log::debug!("Error reading special format from clipboard: {}", e);
-						results.push(ClipboardData::None);
-						err = Some(e);
-						err_count += 1;
+						log::debug!("Error reading special format from clipboard, {:?}", e);
+						cur_err = Some(e);
 					}
 				},
+			}
+			if let Some(e) = cur_err {
+				match e {
+					Error::ClipboardOccupied => {
+						// If the clipboard is occupied, we need to stop trying to read from it.
+						return Err(e);
+					}
+					_ => {
+						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1
+					}
+				}
 			}
 		}
 
@@ -818,15 +842,13 @@ impl<'clipboard> Set<'clipboard> {
 		} else {
 			clipboard_win::raw::set_string_with(&data, options::NoClear)
 		}
-		.map_err(|_| Error::unknown("Could not place the specified text to the clipboard"))
+		.map_err(|e| map_error_code("Could not place the specified text to the clipboard", e))
 	}
 
 	pub(crate) fn rtf(self, data: Cow<'_, str>) -> Result<(), Error> {
 		let open_clipboard = self.clipboard?;
 		if let Err(e) = clipboard_win::raw::empty() {
-			return Err(Error::unknown(format!(
-				"Failed to empty the clipboard. Got error code: {e}"
-			)));
+			return Err(map_error_code("Failed to empty the clipboard. Got error code: {:?}", e));
 		};
 
 		Self::rtf_(data)?;
@@ -842,7 +864,7 @@ impl<'clipboard> Set<'clipboard> {
 	fn rtf_(data: Cow<'_, str>) -> Result<(), Error> {
 		let format = register_format_(CFSTR_MIME_RICHTEXT)?;
 		clipboard_win::raw::set_without_clear(format, data.as_bytes())
-			.map_err(|e| Error::unknown(e.to_string()))
+			.map_err(|e| map_error_code("failed to set without clear", e))
 	}
 
 	pub(crate) fn html(self, html: Cow<'_, str>, alt: Option<Cow<'_, str>>) -> Result<(), Error> {
@@ -859,9 +881,7 @@ impl<'clipboard> Set<'clipboard> {
 	fn html_(html: Cow<'_, str>, alt: Option<Cow<'_, str>>, clear: bool) -> Result<(), Error> {
 		if clear {
 			if let Err(e) = clipboard_win::raw::empty() {
-				return Err(Error::unknown(format!(
-					"Failed to empty the clipboard. Got error code: {e}"
-				)));
+				return Err(map_error_code("Failed to empty the clipboard, {:?}", e));
 			};
 		}
 
@@ -869,8 +889,9 @@ impl<'clipboard> Set<'clipboard> {
 			Some(s) => s.into(),
 			None => String::new(),
 		};
-		clipboard_win::raw::set_string_with(&alt, options::NoClear)
-			.map_err(|_| Error::unknown("Could not place the specified text to the clipboard"))?;
+		clipboard_win::raw::set_string_with(&alt, options::NoClear).map_err(|e| {
+			map_error_code("Could not place the specified text to the clipboard", e)
+		})?;
 
 		Self::html_without_alt_(html)
 	}
@@ -880,15 +901,13 @@ impl<'clipboard> Set<'clipboard> {
 		let format = register_format_("HTML Format")?;
 		let html = wrap_html(&html);
 		clipboard_win::raw::set_without_clear(format, html.as_bytes())
-			.map_err(|e| Error::unknown(e.to_string()))
+			.map_err(|e| map_error_code("failed to set without clear", e))
 	}
 
 	pub(crate) fn image(self, image: ImageData) -> Result<(), Error> {
 		let _open_clipboard = self.clipboard?;
 		if let Err(e) = clipboard_win::raw::empty() {
-			return Err(Error::unknown(format!(
-				"Failed to empty the clipboard. Got error code: {e}"
-			)));
+			return Err(map_error_code("Failed to empty the clipboard", e));
 		};
 		Self::image_(image)
 	}
@@ -913,15 +932,13 @@ impl<'clipboard> Set<'clipboard> {
 	fn image_svg(svg: String) -> Result<(), Error> {
 		let format = register_format_(CFSTR_MIME_SVG_XML)?;
 		clipboard_win::raw::set_without_clear(format, svg.as_bytes())
-			.map_err(|_| Error::unknown("Failed to set SVG data to clipboard"))
+			.map_err(|e| map_error_code("Failed to set SVG data to clipboard", e))
 	}
 
 	pub(crate) fn special(self, format_name: &str, data: &[u8]) -> Result<(), Error> {
 		let open_clipboard = self.clipboard?;
 		if let Err(e) = clipboard_win::raw::empty() {
-			return Err(Error::unknown(format!(
-				"Failed to empty the clipboard. Got error code: {e}"
-			)));
+			return Err(map_error_code("Failed to empty the clipboard", e));
 		};
 		Self::special_(format_name, data)?;
 		add_clipboard_exclusions(
@@ -936,16 +953,16 @@ impl<'clipboard> Set<'clipboard> {
 	fn special_(format_name: &str, data: &[u8]) -> Result<(), Error> {
 		let format = register_format_(format_name)?;
 		clipboard_win::raw::set_without_clear(format, data)
-			.map_err(|_| Error::unknown("failed to set clipboard data"))
+			.map_err(|e| map_error_code("failed to set clipboard data", e))
 	}
 
+	// No need to implement checking `ClipboardOccupied` as the `Get` does.
+	// Because it's a common case that `Get`s are called consecutively in multiple threads or processes.
 	pub(crate) fn formats(self, data: &[ClipboardData]) -> Result<(), Error> {
 		let open_clipboard = self.clipboard?;
 
 		if let Err(e) = clipboard_win::raw::empty() {
-			return Err(Error::unknown(format!(
-				"Failed to empty the clipboard. Got error code: {e}"
-			)));
+			return Err(map_error_code("Failed to empty the clipboard", e));
 		};
 
 		for item in data.iter() {
@@ -1000,8 +1017,9 @@ fn add_clipboard_exclusions(
 		{
 			// The documentation states "place any data on the clipboard in this format to prevent...", and using the zero bytes
 			// like the others for consistency works.
-			clipboard_win::raw::set_without_clear(format.get(), CLIPBOARD_EXCLUSION_DATA)
-				.map_err(|_| Error::unknown("Failed to exclude data from clipboard monitoring"))?;
+			clipboard_win::raw::set_without_clear(format.get(), CLIPBOARD_EXCLUSION_DATA).map_err(
+				|e| map_error_code("failed to exclude data from clipboard monitoring", e),
+			)?;
 		}
 	}
 
@@ -1011,7 +1029,7 @@ fn add_clipboard_exclusions(
 			// we still have full ownership of the clipboard and aren't moving it to another thread, and this is a well-documented operation.
 			// Due to these reasons, `Error::Unknown` is used because we never expect the error path to be taken.
 			clipboard_win::raw::set_without_clear(format.get(), CLIPBOARD_EXCLUSION_DATA)
-				.map_err(|_| Error::unknown("Failed to exclude data from cloud clipboard"))?;
+				.map_err(|e| map_error_code("failed to exclude data from cloud clipboard", e))?;
 		}
 	}
 
@@ -1019,7 +1037,7 @@ fn add_clipboard_exclusions(
 		if let Some(format) = clipboard_win::register_format("CanIncludeInClipboardHistory") {
 			// See above for reasoning about using `Error::Unknown`.
 			clipboard_win::raw::set_without_clear(format.get(), CLIPBOARD_EXCLUSION_DATA)
-				.map_err(|_| Error::unknown("Failed to exclude data from clipboard history"))?;
+				.map_err(|e| map_error_code("failed to exclude data from clipboard history", e))?;
 		}
 	}
 
@@ -1075,7 +1093,7 @@ impl<'clipboard> Clear<'clipboard> {
 
 	pub(crate) fn clear(self) -> Result<(), Error> {
 		let _clipboard_assertion = self.clipboard?;
-		clipboard_win::empty().map_err(|_| Error::unknown("failed to clear clipboard"))
+		clipboard_win::empty().map_err(|e| map_error_code("failed to clear clipboard", e))
 	}
 }
 
