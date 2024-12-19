@@ -14,6 +14,8 @@ fn main() {
 		ClipboardFormat::ImageRgba,
 		ClipboardFormat::ImagePng,
 		ClipboardFormat::ImageSvg,
+		#[cfg(any(target_os = "linux", target_os = "macos"))]
+		ClipboardFormat::FileUrl,
 		ClipboardFormat::Special(FORMAT_SPECIAL),
 	];
 	for d in ctx.get_formats(&formats).unwrap() {

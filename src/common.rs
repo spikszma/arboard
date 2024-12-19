@@ -8,8 +8,8 @@ the Apache 2.0 or the MIT license at the licensee's choice. The terms
 and conditions of the chosen license apply to this file.
 */
 
-use std::borrow::Cow;
 use serde_derive::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 /// An error that might happen during a clipboard operation.
 ///
@@ -104,6 +104,8 @@ pub enum ClipboardFormat<'a> {
 	ImageRgba,
 	ImagePng,
 	ImageSvg,
+	#[cfg(any(target_os = "linux", target_os = "macos"))]
+	FileUrl,
 	Special(&'a str),
 }
 
@@ -115,6 +117,8 @@ pub enum ClipboardData {
 	Rtf(String),
 	Image(ImageData<'static>),
 	Special((String, Vec<u8>)),
+	#[cfg(any(target_os = "linux", target_os = "macos"))]
+	FileUrl(Vec<String>),
 	None,
 }
 
