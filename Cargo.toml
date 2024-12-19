@@ -41,6 +41,7 @@ x11rb = { version = "0.13" }
 wl-clipboard-rs = { version = "0.9", optional = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
 parking_lot = "0.12"
+percent-encoding = {version  ="2.3"}
 
 [[example]]
 name = "get_image"

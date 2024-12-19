@@ -430,6 +430,10 @@ impl Clipboard {
 						err_count += 1;
 					}
 				},
+				ClipboardFormat::FileUrl => {
+					// to-do: add support for file urls
+					results.push(ClipboardData::None);
+				}
 				ClipboardFormat::Special(format_name) => {
 					match self.get_special(format_name, selection) {
 						Ok(data) => {
