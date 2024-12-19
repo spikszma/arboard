@@ -31,6 +31,16 @@ use std::{
 
 const NS_PASTEBOARD_TYPE_SVG: &str = "public.svg-image";
 
+mod url_encode {
+	use percent_encoding::AsciiSet;
+	const ENCODE_SET: AsciiSet = percent_encoding::CONTROLS.add(b' ').add(b'-').add(b'%');
+
+	pub(super) fn encode_path_to_uri(path: &str) -> String {
+		let encoded = percent_encoding::percent_encode(path.as_bytes(), &ENCODE_SET).to_string();
+		format!("file://{}", encoded)
+	}
+}
+
 /// Returns an NSImage object on success.
 fn image_from_pixels(
 	pixels: Vec<u8>,
@@ -674,6 +684,17 @@ impl<'clipboard> Set<'clipboard> {
 							write_objects.push(ProtocolObject::from_id(item));
 						}
 					},
+					ClipboardData::FileUrl(urls) => {
+						for url in urls.iter() {
+							let url = url_encode::encode_path_to_uri(url);
+							let item = objc2_app_kit::NSPasteboardItem::new();
+							item.setString_forType(
+								&NSString::from_str(&url),
+								NSPasteboardTypeFileURL,
+							);
+							write_objects.push(ProtocolObject::from_id(item));
+						}
+					}
 					ClipboardData::Special((format_name, data)) => {
 						let nsdata: *const objc2_foundation::NSData = msg_send![class!(NSData), dataWithBytes:data.as_ptr() as *const c_void length:data.len() as u64];
 						if nsdata.is_null() {
