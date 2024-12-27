@@ -16,6 +16,7 @@ const MIME_PNG: &str = "image/png";
 const MIME_SVG: &str = "image/svg+xml";
 const MIME_HTML: &'static str = "text/html";
 const MIME_RTF: &'static str = "text/rtf";
+const MIME_URL_LIST: &'static str = "text/uri-list";
 
 pub(crate) struct Clipboard {}
 
@@ -64,7 +65,10 @@ impl Clipboard {
 		opts.clipboard(selection.try_into()?);
 		opts.copy(source.source, source.mime_type.clone()).map_err(|e| match e {
 			CopyError::PrimarySelectionUnsupported => Error::ClipboardNotSupported,
-			other => into_unknown(&format!("failed to copy clipboard with {:?}", source.mime_type), other),
+			other => into_unknown(
+				&format!("failed to copy clipboard with {:?}", source.mime_type),
+				other,
+			),
 		})
 	}
 
@@ -127,6 +131,10 @@ impl Clipboard {
 		self.get_plain(selection, wl_clipboard_rs::paste::MimeType::Specific(MIME_HTML))
 	}
 
+	pub(crate) fn get_url_list(&mut self, selection: LinuxClipboardKind) -> Result<String, Error> {
+		self.get_plain(selection, wl_clipboard_rs::paste::MimeType::Specific(&MIME_URL_LIST))
+	}
+
 	fn get_plain(
 		&mut self,
 		selection: LinuxClipboardKind,
@@ -174,6 +182,15 @@ impl Clipboard {
 		MimeSource {
 			source: Source::Bytes(html.into_owned().into_bytes().into_boxed_slice()),
 			mime_type: MimeType::Specific(String::from(MIME_HTML)),
+		}
+	}
+
+	fn url_list_to_mime_source(urls: &[String]) -> MimeSource {
+		let urls: Vec<String> = urls.iter().map(|s| super::url::encode_path_to_uri(s)).collect();
+		let urls = urls.join("\n");
+		MimeSource {
+			source: Source::Bytes(urls.into_bytes().into_boxed_slice()),
+			mime_type: MimeType::Specific(String::from(MIME_URL_LIST)),
 		}
 	}
 
@@ -430,10 +447,18 @@ impl Clipboard {
 						err_count += 1;
 					}
 				},
-				ClipboardFormat::FileUrl => {
-					// to-do: add support for file urls
-					results.push(ClipboardData::None);
-				}
+				ClipboardFormat::FileUrl => match self.get_url_list(selection) {
+					Ok(urls) => {
+						results.push(ClipboardData::FileUrl(super::url::parse_uri_list(&urls)?))
+					}
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => {
+						log::debug!("Error getting url list: {:?}", e);
+						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
+					}
+				},
 				ClipboardFormat::Special(format_name) => {
 					match self.get_special(format_name, selection) {
 						Ok(data) => {
@@ -491,6 +516,9 @@ impl Clipboard {
 						sources.push(Self::svg_to_mime_source(svg.to_string()));
 					}
 				},
+				ClipboardData::FileUrl(urls) => {
+					sources.push(Self::url_list_to_mime_source(urls));
+				}
 				ClipboardData::Special((format_name, data)) => {
 					sources.push(Self::special_to_mime_source(format_name, data));
 				}
