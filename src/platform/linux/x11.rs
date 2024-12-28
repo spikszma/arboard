@@ -82,6 +82,14 @@ x11rb::atom_manager! {
 
 		SVG_MIME: b"image/svg+xml",
 
+		// Works on KDE Plasma
+		URL_LIST: b"text/uri-list",
+
+		// These are some special formats that are used by some file managers
+		// Works on GNOME
+		X_SPECIAL_GNOME_COPIED_FILES: b"x-special/gnome-copied-files",
+		X_SPECIAL_NAUTILUS_CLIPBOARD: b"x-special/nautilus-clipboard",
+
 		// This is just some random name for the property on our window, into which
 		// the clipboard owner writes the data we requested.
 		ARBOARD_CLIPBOARD,
@@ -1046,6 +1054,37 @@ impl Clipboard {
 		ClipboardDataX11 { bytes: svg.into_bytes(), format: self.inner.atoms.SVG_MIME }
 	}
 
+	pub(crate) fn get_file_urls(
+		&self,
+		selection: LinuxClipboardKind,
+	) -> Result<Vec<String>, Error> {
+		let formats = [
+			self.inner.atoms.URL_LIST,
+			self.inner.atoms.X_SPECIAL_GNOME_COPIED_FILES,
+			self.inner.atoms.X_SPECIAL_NAUTILUS_CLIPBOARD,
+		];
+		let result = self.inner.read(&formats, selection)?;
+		super::url::parse_plain_uri_list(result.bytes)
+	}
+
+	fn file_urls_to_clip_data(&self, urls: &[String]) -> Vec<ClipboardDataX11> {
+		let urls: Vec<String> = urls.iter().map(|s| super::url::encode_path_to_uri(s)).collect();
+		let urls = urls.join("\n");
+		let text_uri_list_data = urls.as_bytes().to_vec();
+		let gnome_copied_files_data = ["copy\n".as_bytes(), urls.as_bytes()].concat();
+		vec![
+			ClipboardDataX11 { bytes: text_uri_list_data, format: self.inner.atoms.URL_LIST },
+			ClipboardDataX11 {
+				bytes: gnome_copied_files_data.clone(),
+				format: self.inner.atoms.X_SPECIAL_GNOME_COPIED_FILES,
+			},
+			ClipboardDataX11 {
+				bytes: gnome_copied_files_data.clone(),
+				format: self.inner.atoms.X_SPECIAL_NAUTILUS_CLIPBOARD,
+			},
+		]
+	}
+
 	pub(crate) fn get_special(
 		&self,
 		format_name: &str,
@@ -1158,6 +1197,16 @@ impl Clipboard {
 						err_count += 1;
 					}
 				},
+				ClipboardFormat::FileUrl => match self.get_file_urls(selection) {
+					Ok(urls) => results.push(ClipboardData::FileUrl(urls)),
+					Err(Error::ContentNotAvailable) => results.push(ClipboardData::None),
+					Err(e) => {
+						log::debug!("Error while getting file urls: {:?}", e);
+						results.push(ClipboardData::None);
+						err = Some(e);
+						err_count += 1;
+					}
+				},
 				ClipboardFormat::Special(format_name) => {
 					match self.get_special(format_name, selection) {
 						Ok(data) => {
@@ -1205,6 +1254,9 @@ impl Clipboard {
 					ImageData::Png(png) => vec_data_x11.push(self.png_to_clip_data(png.to_vec())),
 					ImageData::Svg(svg) => vec_data_x11.push(self.svg_to_clip_data(svg.clone())),
 				},
+				ClipboardData::FileUrl(urls) => {
+					vec_data_x11.extend(self.file_urls_to_clip_data(&urls));
+				}
 				ClipboardData::Special((format_name, data)) => {
 					vec_data_x11.push(self.special_to_clip_data(format_name, data)?)
 				}

@@ -35,12 +35,14 @@ objc2-foundation = { version = "0.2.0", features = ["NSArray", "NSString", "NSEn
 objc2-app-kit = { version = "0.2.0", features = ["NSPasteboard", "NSPasteboardItem", "NSImage"] }
 core-graphics = { version = "0.23" }
 image = { version = "0.25", default-features = false, features = ["tiff"] }
+percent-encoding = {version  ="2.3"}
 
 [target.'cfg(all(unix, not(any(target_os="macos", target_os="android", target_os="emscripten"))))'.dependencies]
 x11rb = { version = "0.13" }
 wl-clipboard-rs = { version = "0.9", optional = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
 parking_lot = "0.12"
+percent-encoding = {version  ="2.3"}
 
 [[example]]
 name = "get_image"

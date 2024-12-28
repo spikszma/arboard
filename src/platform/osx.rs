@@ -19,10 +19,10 @@ use objc2::{
 	ClassType,
 };
 use objc2_app_kit::{
-	NSPasteboard, NSPasteboardType, NSPasteboardTypeHTML, NSPasteboardTypePNG, NSPasteboardTypeRTF,
-	NSPasteboardTypeString, NSPasteboardWriting,
+	NSPasteboard, NSPasteboardType, NSPasteboardTypeFileURL, NSPasteboardTypeHTML,
+	NSPasteboardTypePNG, NSPasteboardTypeRTF, NSPasteboardTypeString, NSPasteboardWriting,
 };
-use objc2_foundation::{NSArray, NSData, NSString};
+use objc2_foundation::{NSArray, NSData, NSString, NSURL};
 use std::{
 	borrow::Cow,
 	os::raw::c_void,
@@ -30,6 +30,16 @@ use std::{
 };
 
 const NS_PASTEBOARD_TYPE_SVG: &str = "public.svg-image";
+
+mod url_encode {
+	use percent_encoding::AsciiSet;
+	const ENCODE_SET: AsciiSet = percent_encoding::CONTROLS.add(b' ').add(b'-').add(b'%');
+
+	pub(super) fn encode_path_to_uri(path: &str) -> String {
+		let encoded = percent_encoding::percent_encode(path.as_bytes(), &ENCODE_SET).to_string();
+		format!("file://{}", encoded)
+	}
+}
 
 /// Returns an NSImage object on success.
 fn image_from_pixels(
@@ -308,6 +318,7 @@ impl<'clipboard> Get<'clipboard> {
 			let mut results = Vec::new();
 			for format in formats {
 				let pre_size = results.len();
+				let mut file_urls = Vec::new();
 				for item in contents.iter() {
 					match format {
 						ClipboardFormat::Text => {
@@ -366,6 +377,17 @@ impl<'clipboard> Get<'clipboard> {
 								break;
 							}
 						},
+						ClipboardFormat::FileUrl => unsafe {
+							if let Some(urls) = item.stringForType(NSPasteboardTypeFileURL) {
+								let Some(urls) = NSURL::URLWithString(&urls) else {
+									log::debug!("Error converting to NSURL");
+									break;
+								};
+								if let Some(path) = urls.path() {
+									file_urls.push(path.to_string());
+								}
+							}
+						},
 						ClipboardFormat::Special(format_name) => {
 							if let Some(data) =
 								unsafe { item.dataForType(&NSString::from_str(format_name)) }
@@ -379,6 +401,10 @@ impl<'clipboard> Get<'clipboard> {
 						}
 					}
 				}
+				if !file_urls.is_empty() {
+					results.push(ClipboardData::FileUrl(file_urls));
+				}
+
 				if results.len() == pre_size {
 					results.push(ClipboardData::None);
 				}
@@ -658,6 +684,17 @@ impl<'clipboard> Set<'clipboard> {
 							write_objects.push(ProtocolObject::from_id(item));
 						}
 					},
+					ClipboardData::FileUrl(urls) => {
+						for url in urls.iter() {
+							let url = url_encode::encode_path_to_uri(url);
+							let item = objc2_app_kit::NSPasteboardItem::new();
+							item.setString_forType(
+								&NSString::from_str(&url),
+								NSPasteboardTypeFileURL,
+							);
+							write_objects.push(ProtocolObject::from_id(item));
+						}
+					}
 					ClipboardData::Special((format_name, data)) => {
 						let nsdata: *const objc2_foundation::NSData = msg_send![class!(NSData), dataWithBytes:data.as_ptr() as *const c_void length:data.len() as u64];
 						if nsdata.is_null() {

@@ -9,6 +9,7 @@ use crate::{
 };
 
 mod x11;
+mod url;
 
 #[cfg(feature = "wayland-data-control")]
 mod wayland;
