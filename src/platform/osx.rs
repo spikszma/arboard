@@ -638,25 +638,38 @@ impl<'clipboard> Set<'clipboard> {
 		self.clipboard.clear();
 
 		autoreleasepool(|_| unsafe {
+			// Use a single NSPasteboardItem for text-based formats (Text, Rtf, Html, Special)
+			// so they are treated as multiple representations of the same content,
+			// not as separate items that would all be pasted.
+			//
+			// Design note: Special data (e.g., owner marker) is placed in main_item along with
+			// text formats, while Image/FileUrl use separate items. Ideally Special should be
+			// in the same item as Image/FileUrl too, but this doesn't affect functionality
+			// since RustDesk iterates all items when reading. Can be optimized later if needed.
+			let main_item = objc2_app_kit::NSPasteboardItem::new();
+			let mut has_main_item_data = false;
+
 			let mut write_objects: Vec<Id<ProtocolObject<(dyn NSPasteboardWriting + 'static)>>> =
 				vec![];
+
 			for d in data {
 				match d {
-					ClipboardData::Text(data) => {
-						let item = objc2_app_kit::NSPasteboardItem::new();
-						item.setString_forType(&NSString::from_str(&data), NSPasteboardTypeString);
-						write_objects.push(ProtocolObject::from_id(item));
+					// Text-based formats go into the main_item as different representations
+					ClipboardData::Text(text) => {
+						main_item
+							.setString_forType(&NSString::from_str(&text), NSPasteboardTypeString);
+						has_main_item_data = true;
 					}
-					ClipboardData::Rtf(data) => {
-						let item = objc2_app_kit::NSPasteboardItem::new();
-						item.setString_forType(&NSString::from_str(&data), NSPasteboardTypeRTF);
-						write_objects.push(ProtocolObject::from_id(item));
+					ClipboardData::Rtf(rtf) => {
+						main_item.setString_forType(&NSString::from_str(&rtf), NSPasteboardTypeRTF);
+						has_main_item_data = true;
 					}
-					ClipboardData::Html(data) => {
-						let item = objc2_app_kit::NSPasteboardItem::new();
-						item.setString_forType(&NSString::from_str(&data), NSPasteboardTypeHTML);
-						write_objects.push(ProtocolObject::from_id(item));
+					ClipboardData::Html(html) => {
+						main_item
+							.setString_forType(&NSString::from_str(&html), NSPasteboardTypeHTML);
+						has_main_item_data = true;
 					}
+					// Image and FileUrl use separate items as they require different object types
 					ClipboardData::Image(data) => match data {
 						ImageData::Rgba(data) => {
 							let pixels = data.bytes.clone().into();
@@ -702,15 +715,23 @@ impl<'clipboard> Set<'clipboard> {
 								description: "Failed to create NSData from bytes".into(),
 							});
 						}
-						let item = objc2_app_kit::NSPasteboardItem::new();
-						item.setData_forType(
+						main_item.setData_forType(
 							&*(nsdata as *const NSData),
 							&NSString::from_str(format_name),
 						);
-						write_objects.push(ProtocolObject::from_id(item));
+						has_main_item_data = true;
 					}
 					_ => {}
 				}
+			}
+
+			// Add the main item first if it has data
+			if has_main_item_data {
+				write_objects.insert(0, ProtocolObject::from_id(main_item));
+			}
+
+			if write_objects.is_empty() {
+				return Ok(());
 			}
 
 			if !self.clipboard.pasteboard.writeObjects(&NSArray::from_vec(write_objects)) {
